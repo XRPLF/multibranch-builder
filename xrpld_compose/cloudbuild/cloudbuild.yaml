@@ -1,0 +1,49 @@
+# Build xrpld from a branch (+ the DatagramMonitor instrumentation) on Cloud Build,
+# matching rippled CI so conan DOWNLOADS the prebuilt deps (no recompiling boost/rocksdb).
+# The datagram commit is fetched + merged inside the build (public, read-only).
+#
+# Run: xrpld-compose build --src <github-url> [--datagram <github-url>] ...
+
+substitutions:
+  _REPO: "https://github.com/XRPLF/rippled.git"
+  _BRANCH: "develop"
+  _DATAGRAM_REPO: ""   # e.g. https://github.com/<fork>/rippled.git
+  _DATAGRAM_REF: ""    # e.g. the datagram branch/commit
+  _AR: "us-central1-docker.pkg.dev/xrplf-perf-network/xrpld"
+  _TAG: "dev"
+  _FORCE_SUPPORTED: "OFF"
+  # Resolved per-build from the branch's strategy-matrix; the default only applies
+  # when that lookup fails. A stale pin fails the build on missing toolchains.
+  _CI_IMAGE: "ghcr.io/xrplf/xrpld/nix-ubuntu:sha-2e25435"
+
+options:
+  # Machine via submit flags: --machine-type (default pool) or --worker-pool + --region.
+  logging: CLOUD_LOGGING_ONLY
+
+timeout: "3600s"
+
+steps:
+  - id: xrpld-build
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_AR}/xrpld:${_TAG}
+      - -f
+      - xrpld.dockerfile
+      - --build-arg
+      - REPO=${_REPO}
+      - --build-arg
+      - BRANCH=${_BRANCH}
+      - --build-arg
+      - DATAGRAM_REPO=${_DATAGRAM_REPO}
+      - --build-arg
+      - DATAGRAM_REF=${_DATAGRAM_REF}
+      - --build-arg
+      - FORCE_SUPPORTED=${_FORCE_SUPPORTED}
+      - --build-arg
+      - CI_IMAGE=${_CI_IMAGE}
+      - .
+
+images:
+  - ${_AR}/xrpld:${_TAG}
