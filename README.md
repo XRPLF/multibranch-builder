@@ -2,7 +2,7 @@
 
 Compose a multi-branch source tree for an XRPLF repository, build it, and push the composed
 tree to an integration branch as a GPG-signed commit. One package, one `kind` per repository
-family (xrpld today), so the perf network (XRPLF/xrpld-perfnet) and the alphanet network
+family, so the perf network (XRPLF/xrpld-perfnet) and the alphanet network
 (XRPLF/xrplf-alphanet-network) depend on it instead of carrying their own copies.
 
 ```
@@ -30,7 +30,8 @@ A kind describes one repository family: the directory its tree is cloned into, i
 branch, the merge drivers and attributes it registers, the guide appended to the resolver
 prompt, the `--set` options it accepts, the conf settings it reads, a prepare step that runs
 after the merges, and the build step. The kind comes from the conf's `kind` line, else from
-the base repository (`rippled` or `xrpld*` means xrpld). Each kind is a package under
+the base repository (`rippled` and `xrpld*` mean xrpld, `xrpl.js` means xrpl_js). Each kind
+is a package under
 `multibranch_builder/targets/<kind>/`.
 
 | kind | tree_dir | default branch | options | settings | prepare | build |
@@ -90,9 +91,9 @@ XRPLF/rippled dangell7/datagram
 ```
 
 Any other `<setting> <value>` header line is handed to the kind, which accepts or rejects it
-(the xrpld kind accepts none; the xrpl_js kind requires `definitions <json-rpc url>`). `rebase` is parsed and recorded in the manifest
-(`branches[].rebase`) for the network repos that keep a branch in step with develop;
-`compose` itself does not act on it.
+(the xrpld kind accepts none; the xrpl_js kind requires `definitions <json-rpc url>`).
+`rebase` is parsed and recorded in the manifest (`branches[].rebase`) for the network repos
+that keep a branch in step with develop; `compose` itself does not act on it.
 
 ## CLI contract
 
