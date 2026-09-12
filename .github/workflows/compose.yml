@@ -1,0 +1,137 @@
+# Reusable: compose the tree a conf describes, build it on Cloud Build, push it signed on green.
+name: compose
+
+on:
+  workflow_call:
+    inputs:
+      conf-path:
+        description: conf file in the calling repo (base/target header, then owner/repo branch lines)
+        required: true
+        type: string
+      project:
+        description: GCP project that runs the build
+        required: true
+        type: string
+      ar:
+        description: Artifact Registry repo, e.g. us-central1-docker.pkg.dev/<project>/xrpld
+        required: true
+        type: string
+      pool:
+        description: private worker pool name ('' = default pool)
+        required: false
+        type: string
+        default: ""
+      force-supported:
+        description: compile every amendment as Supported::Yes (ON) or as the tree declares (OFF)
+        required: false
+        type: string
+        default: "OFF"
+      dry-run:
+        description: print the plan and stop; no clone, build or push
+        required: false
+        type: boolean
+        default: false
+      workload-identity-provider:
+        description: google-github-actions/auth workload_identity_provider
+        required: true
+        type: string
+      service-account:
+        description: google-github-actions/auth service_account
+        required: false
+        type: string
+        default: ""
+      bot-name:
+        description: git author/committer name of the service account that signs and pushes
+        required: false
+        type: string
+        default: dangell8
+      bot-email:
+        description: git email of the service account; must match a uid on the GPG key
+        required: false
+        type: string
+        default: dangell8@users.noreply.github.com
+      xrpld-compose-ref:
+        description: XRPLF/xrpld-compose ref to install
+        required: false
+        type: string
+        default: main
+    secrets:
+      GITHUB_BOT_PAT:
+        required: true
+      GPG_PRIVATE_KEY:
+        required: true
+      ANTHROPIC_API_KEY:
+        required: true
+
+jobs:
+  compose:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      WORKDIR: ${{ github.workspace }}/.compose
+      GIT_BOT_NAME: ${{ inputs.bot-name }}
+      GIT_BOT_EMAIL: ${{ inputs.bot-email }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install xrpld-compose
+        run: pip install "git+https://github.com/XRPLF/xrpld-compose@${{ inputs.xrpld-compose-ref }}"
+
+      - name: Install the claude CLI
+        if: ${{ !inputs.dry-run }}
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Plan
+        if: ${{ inputs.dry-run }}
+        run: |
+          xrpld-compose compose --conf "${{ inputs.conf-path }}" --workdir "$WORKDIR" \
+            --force-supported "${{ inputs.force-supported }}" --dry-run | tee plan.txt
+          { echo '### compose plan (dry run)'; echo '```'; cat plan.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Compose
+        if: ${{ !inputs.dry-run }}
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          xrpld-compose compose --conf "${{ inputs.conf-path }}" --workdir "$WORKDIR" \
+            --force-supported "${{ inputs.force-supported }}"
+
+      - name: Per-branch outcome
+        if: ${{ !inputs.dry-run && always() }}
+        run: |
+          if [ -f "$WORKDIR/manifest.json" ]; then
+            { echo '### compose'; xrpld-compose manifest "$WORKDIR" --markdown; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: google-github-actions/auth@v2
+        if: ${{ !inputs.dry-run }}
+        with:
+          workload_identity_provider: ${{ inputs.workload-identity-provider }}
+          service_account: ${{ inputs.service-account }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+        if: ${{ !inputs.dry-run }}
+
+      - name: Build
+        if: ${{ !inputs.dry-run }}
+        run: |
+          xrpld-compose build --tree "$WORKDIR/rippled" --workdir "$WORKDIR" \
+            --project "${{ inputs.project }}" --ar "${{ inputs.ar }}" --pool "${{ inputs.pool }}" \
+            --force-supported "${{ inputs.force-supported }}" | tee build.txt
+          { echo '### build'; echo "image: \`$(tail -n1 build.txt)\`"; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Push
+        if: ${{ !inputs.dry-run }}
+        env:
+          GITHUB_BOT_PAT: ${{ secrets.GITHUB_BOT_PAT }}
+          GIT_SIGNING_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          xrpld-compose push --tree "$WORKDIR/rippled" \
+            --manifest "$WORKDIR/manifest.json" --build "$WORKDIR/build.json" | tee push.txt
+          { echo '### push'; cat push.txt; } >> "$GITHUB_STEP_SUMMARY"
