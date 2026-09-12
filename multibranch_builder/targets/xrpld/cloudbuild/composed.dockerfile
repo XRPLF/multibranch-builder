@@ -2,9 +2,9 @@
 # `multibranch-builder compose`). Same conan-download build as xrpld.dockerfile, but the source is
 # COPIED from the upload — Cloud Build never clones, merges, or runs claude.
 ARG CI_IMAGE=ghcr.io/xrplf/xrpld/nix-ubuntu:sha-2e25435
-# ON compiles every amendment as Supported::Yes. Required for a network whose chain has
-# amendments enabled that the composed tree does not mark supported, else nodes
-# amendment-block at startup.
+# ON rewrites every Supported::No amendment in features.macro to Supported::Yes before
+# compiling, the same edit the all-amendments CI workflow makes. Required for a network whose
+# chain has amendments enabled that the tree does not mark supported, else nodes amendment-block.
 ARG FORCE_SUPPORTED=OFF
 
 FROM ${CI_IMAGE} AS build
@@ -26,12 +26,14 @@ RUN mkdir -p .build && cd .build && \
 
 # Compile (parallelism memory-capped: rippled TUs need ~3 GB each; *-highcpu is 1 GB/core).
 RUN cd .build && \
-    if [ "$FORCE_SUPPORTED" = "ON" ] && ! grep -rq "force_supported" ../cmake ../CMakeLists.txt; then \
-      echo "FORCE_SUPPORTED=ON but this tree has no force_supported cmake option" >&2; exit 1; \
+    if [ "$FORCE_SUPPORTED" = "ON" ]; then \
+      MACRO=../include/xrpl/protocol/detail/features.macro && \
+      sed -i 's/Supported::No,/Supported::Yes,/g' "$MACRO" && \
+      ! grep -q 'Supported::No,' "$MACRO" && \
+      echo "FORCE_SUPPORTED=ON: every amendment in features.macro is Supported::Yes"; \
     fi && \
     cmake -DCMAKE_TOOLCHAIN_FILE:FILEPATH=build/generators/conan_toolchain.cmake \
           -DCMAKE_BUILD_TYPE=Release -Dxrpld=ON -Dtests=OFF \
-          -Dforce_supported="$FORCE_SUPPORTED" \
           -DCMAKE_CXX_FLAGS=-DBOOST_ASIO_HAS_STD_INVOKE_RESULT \
           -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc" .. && \
     JOBS=$(awk -v c="$(nproc)" '/MemTotal/{m=int($2/1024/1024/3); j=(m<c?m:c); print (j<1?1:j)}' /proc/meminfo) && \
