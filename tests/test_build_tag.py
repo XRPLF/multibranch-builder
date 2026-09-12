@@ -5,9 +5,9 @@ from unittest.mock import patch
 
 import pytest
 
-from xrpld_builder import build, cli
-from xrpld_builder.compose import BranchOutcome, Manifest
-from xrpld_builder.conf import BranchEntry
+from multibranch_builder import build, cli
+from multibranch_builder.compose import BranchOutcome, Manifest
+from multibranch_builder.conf import BranchEntry
 
 SHA = "0123456789abcdef0123456789abcdef01234567"
 
@@ -46,7 +46,7 @@ def test_submit_command_rejects_commas_in_substitutions():
         build.submit_command("/s", "/c", {"_TAG": "a,b"}, "p", None)
 
 
-@patch("xrpld_builder.build._submit", return_value=("build-1", "SUCCESS"))
+@patch("multibranch_builder.build._submit", return_value=("build-1", "SUCCESS"))
 def test_submit_tree_propagates_ar_into_substitutions_and_image(mock_submit, tmp_path):
     tree = tmp_path / "rippled"
     (tree / ".github/scripts/strategy-matrix").mkdir(parents=True)
@@ -63,8 +63,8 @@ def test_submit_tree_propagates_ar_into_substitutions_and_image(mock_submit, tmp
     assert (project, pool, region) == ("xrplf-alphanet", "xrpld-pool", "us-central1")
 
 
-@patch("xrpld_builder.build.ci_image_for", return_value="ghcr.io/xrplf/xrpld/nix-ubuntu:sha-x")
-@patch("xrpld_builder.build._submit", return_value=("build-2", "SUCCESS"))
+@patch("multibranch_builder.build.ci_image_for", return_value="ghcr.io/xrplf/xrpld/nix-ubuntu:sha-x")
+@patch("multibranch_builder.build._submit", return_value=("build-2", "SUCCESS"))
 def test_submit_branch_substitutions(mock_submit, mock_ci):
     src = BranchEntry("XRPLF", "rippled", "dangell7/x")
     dg = BranchEntry("XRPLF", "rippled", "dangell7/datagram")
@@ -85,8 +85,8 @@ def test_ci_image_from_tree_falls_back_loudly(tmp_path, capsys):
     assert "WARNING" in capsys.readouterr().err
 
 
-@patch("xrpld_builder.build._run")
-@patch("xrpld_builder.build.shutil.which", return_value="/usr/bin/gh")
+@patch("multibranch_builder.build._run")
+@patch("multibranch_builder.build.shutil.which", return_value="/usr/bin/gh")
 def test_ci_image_for_reads_gh_api(mock_which, mock_run):
     import base64
     content = base64.b64encode(json.dumps({"image_tag": "sha-2e25435"}).encode()).decode()
@@ -107,7 +107,7 @@ def _write_manifest(workdir, **overrides):
     return manifest
 
 
-@patch("xrpld_builder.build.submit_tree")
+@patch("multibranch_builder.build.submit_tree")
 def test_cli_build_tree_honors_ar_and_prints_image_last(mock_submit, tmp_path, capsys):
     workdir = tmp_path / "w"
     (workdir / "rippled").mkdir(parents=True)
@@ -129,7 +129,7 @@ def test_cli_build_tree_honors_ar_and_prints_image_last(mock_submit, tmp_path, c
     assert record["tag"] == "alphanet-01234567-dg"
 
 
-@patch("xrpld_builder.build.submit_tree")
+@patch("multibranch_builder.build.submit_tree")
 def test_cli_build_explicit_tag_and_force_supported_override(mock_submit, tmp_path):
     workdir = tmp_path / "w"
     (workdir / "rippled").mkdir(parents=True)
@@ -141,7 +141,7 @@ def test_cli_build_explicit_tag_and_force_supported_override(mock_submit, tmp_pa
     assert args[3] == "custom" and kwargs["force_supported"] == "OFF"
 
 
-@patch("xrpld_builder.build.submit_tree")
+@patch("multibranch_builder.build.submit_tree")
 def test_cli_build_fails_when_status_not_success(mock_submit, tmp_path):
     workdir = tmp_path / "w"
     (workdir / "rippled").mkdir(parents=True)
@@ -160,8 +160,8 @@ def test_cli_build_refuses_manifest_with_conflict(tmp_path):
         cli.main(["build", "--tree", str(workdir / "rippled"), "--project", "p", "--ar", "reg", "--workdir", str(workdir)])
 
 
-@patch("xrpld_builder.build.submit_branch")
-@patch("xrpld_builder.build.resolve_sha", return_value=SHA)
+@patch("multibranch_builder.build.submit_branch")
+@patch("multibranch_builder.build.resolve_sha", return_value=SHA)
 def test_cli_build_src_tag_and_ar(mock_sha, mock_submit, tmp_path, capsys):
     ar = "us-central1-docker.pkg.dev/xrplf-perf-network/xrpld"
     mock_submit.return_value = {"image": f"{ar}/xrpld:t", "build_id": "b", "status": "SUCCESS", "ci_image": "i"}

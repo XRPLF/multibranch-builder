@@ -5,8 +5,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from xrpld_builder import merge
-from xrpld_builder.merge import (
+from multibranch_builder import merge
+from multibranch_builder.merge import (
     AI_RESOLVED, CONFLICT, MERGED, UP_TO_DATE, ai_resolve, files_with_conflict_markers,
     merge_prompt, merge_source_into_current,
 )
@@ -90,7 +90,7 @@ def test_merge_prompt_names_files_and_carries_guide():
     assert "registry-number collisions" in prompt
 
 
-@patch("xrpld_builder.merge.shutil.which", return_value="/usr/bin/claude")
+@patch("multibranch_builder.merge.shutil.which", return_value="/usr/bin/claude")
 def test_ai_resolve_invokes_claude_with_budget_and_timeout(mock_which, tmp_path):
     conflicted = ["src/a.cpp"]
     (tmp_path / "src").mkdir()
@@ -104,7 +104,7 @@ def test_ai_resolve_invokes_claude_with_budget_and_timeout(mock_which, tmp_path)
             state["conflicted"] = []
         return _completed()
 
-    with patch.object(merge, "_run", fake_run), patch("xrpld_builder.merge.subprocess.run") as claude:
+    with patch.object(merge, "_run", fake_run), patch("multibranch_builder.merge.subprocess.run") as claude:
         claude.return_value = _completed()
         assert ai_resolve(str(tmp_path), "b", "develop", budget_usd=2.5, timeout_s=42) is True
     cmd = claude.call_args.args[0]
@@ -114,25 +114,25 @@ def test_ai_resolve_invokes_claude_with_budget_and_timeout(mock_which, tmp_path)
     assert "registry-number collisions" in cmd[2]
 
 
-@patch("xrpld_builder.merge.shutil.which", return_value="/usr/bin/claude")
+@patch("multibranch_builder.merge.shutil.which", return_value="/usr/bin/claude")
 def test_ai_resolve_false_on_timeout(mock_which, tmp_path):
     with patch.object(merge, "_run", lambda cmd, cwd, check=True: _completed(stdout="a.cpp")), \
-         patch("xrpld_builder.merge.subprocess.run", side_effect=subprocess.TimeoutExpired("claude", 1)):
+         patch("multibranch_builder.merge.subprocess.run", side_effect=subprocess.TimeoutExpired("claude", 1)):
         assert ai_resolve(str(tmp_path), "b", "develop") is False
 
 
-@patch("xrpld_builder.merge.shutil.which", return_value="/usr/bin/claude")
+@patch("multibranch_builder.merge.shutil.which", return_value="/usr/bin/claude")
 def test_ai_resolve_false_when_markers_remain(mock_which, tmp_path):
     (tmp_path / "a.cpp").write_text("<<<<<<< HEAD\n=======\n>>>>>>> x\n")
     with patch.object(merge, "_run", lambda cmd, cwd, check=True: _completed(stdout="a.cpp")), \
-         patch("xrpld_builder.merge.subprocess.run", return_value=_completed()):
+         patch("multibranch_builder.merge.subprocess.run", return_value=_completed()):
         assert ai_resolve(str(tmp_path), "b", "develop") is False
 
 
-@patch("xrpld_builder.merge.shutil.which", return_value=None)
+@patch("multibranch_builder.merge.shutil.which", return_value=None)
 def test_ai_resolve_false_without_claude_cli(mock_which):
     with patch.object(merge, "_run", lambda cmd, cwd, check=True: _completed(stdout="a.cpp")), \
-         patch("xrpld_builder.merge.subprocess.run") as claude:
+         patch("multibranch_builder.merge.subprocess.run") as claude:
         assert ai_resolve("/w", "b", "develop") is False
     claude.assert_not_called()
 

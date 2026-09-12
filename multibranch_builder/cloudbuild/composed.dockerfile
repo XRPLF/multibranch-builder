@@ -1,5 +1,5 @@
 # Compile a pre-composed xrpld source tree (already merged and conflict-resolved by
-# `xrpld-builder compose`). Same conan-download build as xrpld.dockerfile, but the source is
+# `multibranch-builder compose`). Same conan-download build as xrpld.dockerfile, but the source is
 # COPIED from the upload — Cloud Build never clones, merges, or runs claude.
 ARG CI_IMAGE=ghcr.io/xrplf/xrpld/nix-ubuntu:sha-2e25435
 # ON compiles every amendment as Supported::Yes. Required for a network whose chain has

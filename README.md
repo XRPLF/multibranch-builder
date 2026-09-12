@@ -1,4 +1,4 @@
-# xrpld-builder
+# multibranch-builder
 
 Compose a multi-branch xrpld source tree, build it on Google Cloud Build, and push the
 composed tree to a target branch as a GPG-signed commit. One package, three verbs, so the
@@ -6,10 +6,10 @@ perf network (XRPLF/xrpld-perfnet) and the alphanet network (XRPLF/xrplf-alphane
 depend on it instead of carrying their own copies.
 
 ```
-xrpld-builder compose   clone the base, merge each branch in order, write manifest.json
-xrpld-builder build     compile the composed tree (or one branch) on Cloud Build, write build.json
-xrpld-builder push      GPG-sign the composed tree and force-with-lease push it to the target branch
-xrpld-builder manifest  print the manifest trailer (or a markdown table)
+multibranch-builder compose   clone the base, merge each branch in order, write manifest.json
+multibranch-builder build     compile the composed tree (or one branch) on Cloud Build, write build.json
+multibranch-builder push      GPG-sign the composed tree and force-with-lease push it to the target branch
+multibranch-builder manifest  print the manifest trailer (or a markdown table)
 ```
 
 Each subcommand reads and writes one work directory:
@@ -35,7 +35,7 @@ outcomes recorded per branch in the manifest:
 
 Two mechanisms run before claude sees a conflict:
 
-- `xrpld_builder/registry_merge.py` is registered as the repo-local merge driver
+- `multibranch_builder/registry_merge.py` is registered as the repo-local merge driver
   (`.git/info/attributes`, never committed) for `features.macro`, `ledger_entries.macro`,
   `transactions.macro`, `sfields.macro` and `jss.h`. It unions independent entries and
   renumbers an incoming entry whose numeric id collides. Anything it cannot prove safe stays
@@ -45,7 +45,7 @@ Two mechanisms run before claude sees a conflict:
 What remains goes to the local `claude` CLI: `claude -p <prompt> --permission-mode
 bypassPermissions --allowedTools Read,Edit,Bash,Glob,Grep --add-dir <tree> --max-budget-usd 5`
 under a one-hour subprocess timeout. The prompt lists the conflicted files and appends
-`xrpld_builder/merge.md`, the resolution guide (registry-number collisions, namespace and
+`multibranch_builder/merge.md`, the resolution guide (registry-number collisions, namespace and
 file-move rules, the per-file strategy). After claude returns, files that still contain
 conflict markers or stay unmerged make the outcome `conflict`.
 
@@ -70,7 +70,7 @@ that keep a branch in step with develop; `compose` itself does not act on it.
 ## CLI contract
 
 ```
-xrpld-builder compose  --conf FILE | (--src URL [--features URL...]) [--datagram URL]
+multibranch-builder compose  --conf FILE | (--src URL [--features URL...]) [--datagram URL]
                        --workdir DIR [--dry-run] [--force-supported ON|OFF]
 ```
 
@@ -82,7 +82,7 @@ xrpld-builder compose  --conf FILE | (--src URL [--features URL...]) [--datagram
 - `--force-supported` is recorded in the manifest as the build default.
 
 ```
-xrpld-builder build    (--tree DIR/rippled | --src URL [--datagram URL])
+multibranch-builder build    (--tree DIR/rippled | --src URL [--datagram URL])
                        --project P --ar AR [--tag TAG] [--pool POOL] [--force-supported ON|OFF]
                        [--ci-image IMG] --workdir DIR
 ```
@@ -112,7 +112,7 @@ xrpld-builder build    (--tree DIR/rippled | --src URL [--datagram URL])
   enable from the branch commit, so `--build_version` must name that commit.
 
 ```
-xrpld-builder push     --tree DIR/rippled [--target owner/repo@branch]
+multibranch-builder push     --tree DIR/rippled [--target owner/repo@branch]
                        --manifest DIR/manifest.json --build DIR/build.json
 ```
 
@@ -122,15 +122,15 @@ xrpld-builder push     --tree DIR/rippled [--target owner/repo@branch]
 - Configures signing from the environment, creates one signed commit on top of the composed
   tree (an empty commit when nothing else changed) whose message is
   `compose: <branch> from <base> @ <sha8> (<n> branches)` with the trailer
-  `Xrpld-Builder-Manifest: <compact manifest json>`, verifies the signature with
+  `Multibranch-Builder-Manifest: <compact manifest json>`, verifies the signature with
   `git verify-commit HEAD`, and pushes with `--force-with-lease=refs/heads/<branch>:<sha the
   branch has right now>` over PAT-authenticated HTTPS. Unsigned, or without a PAT, it refuses.
 
 ```
-xrpld-builder manifest DIR [--markdown]
+multibranch-builder manifest DIR [--markdown]
 ```
 
-Prints the `Xrpld-Builder-Manifest:` trailer, or a per-branch outcome table for a job summary.
+Prints the `Multibranch-Builder-Manifest:` trailer, or a per-branch outcome table for a job summary.
 
 ## Environment variables
 
@@ -139,7 +139,7 @@ Read at call time, never at import, never printed.
 | variable | used by | meaning |
 |---|---|---|
 | `GITHUB_BOT_PAT` | push | PAT of the service account; the only credential that can push |
-| `GIT_BOT_NAME` | compose, push | git `user.name`; compose falls back to `xrpld-builder` |
+| `GIT_BOT_NAME` | compose, push | git `user.name`; compose falls back to `multibranch-builder` |
 | `GIT_BOT_EMAIL` | compose, push | git `user.email`; must match a uid on the signing key |
 | `GIT_SIGNING_KEY` | push | the armored GPG private key, or its base64 |
 | `ANTHROPIC_API_KEY` | compose | consumed by the `claude` CLI when it resolves conflicts (unset locally to use your own login) |
@@ -156,7 +156,7 @@ Read at call time, never at import, never printed.
 
 `.github/workflows/compose.yml` is a `workflow_call` workflow. Inputs: `conf-path`,
 `project`, `ar`, `pool`, `force-supported`, `dry-run`, `workload-identity-provider`,
-`service-account`, `bot-name`, `bot-email`, `xrpld-builder-ref`. Secrets: `GITHUB_BOT_PAT`,
+`service-account`, `bot-name`, `bot-email`, `multibranch-builder-ref`. Secrets: `GITHUB_BOT_PAT`,
 `GPG_PRIVATE_KEY`, `ANTHROPIC_API_KEY`. It checks out the caller, installs this package and the
 claude CLI, authenticates to GCP with `google-github-actions/auth`, then runs compose, build and
 push on green unless `dry-run`, and writes the per-branch outcome table to the job summary.
@@ -164,7 +164,7 @@ push on green unless `dry-run`, and writes the per-branch outcome table to the j
 ```yaml
 jobs:
   alphanet:
-    uses: XRPLF/xrpld-builder/.github/workflows/compose.yml@main
+    uses: XRPLF/multibranch-builder/.github/workflows/compose.yml@main
     with:
       conf-path: alphanet.conf
       project: xrplf-alphanet
@@ -182,24 +182,3 @@ jobs:
 python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
 .venv/bin/python -m pytest -q
 ```
-
-## Lifted from
-
-- **XRPLF/xrpld-perfnet @ 01ddd24** — `cloudbuild/compose.py` (clone, ordered merges, the
-  registry driver registration, the `claude -p` resolver, the staged upload to
-  `cloudbuild.composed.yaml`), `cloudbuild/compose_lib/registry_merge.py` and its tests
-  (verbatim), the two Cloud Build configs and two dockerfiles, and the `build` Makefile
-  target's sha resolution, tag derivation and strategy-matrix CI image lookup. Changes:
-  `composed.dockerfile` now builds `b2/*` and runs `patchelf --set-interpreter` like
-  `xrpld.dockerfile`; `cloudbuild.composed.yaml` takes `_CI_IMAGE`; the `xrpld-lab create:gcp`
-  handoff print is gone (that subcommand no longer exists); `--ar` is passed through to every
-  submission instead of being recomputed from the project.
-- **Transia-RnD/sentinel-ai** — `libs/github/git_push.py` and its tests (identity and PAT
-  from `GITHUB_BOT_PAT`/`GIT_BOT_NAME`/`GIT_BOT_EMAIL`, key from `GIT_SIGNING_KEY`, ref update
-  reimplemented on the GitHub REST API with `requests`, plus the signed-HEAD and lease checks);
-  from `services/xrpld.py` on branch `docs/merge-skill-registry-collisions`:
-  `_files_with_conflict_markers`, `_merge_source_into_current` and its four outcomes,
-  `_plan_integration` and its tests, the `owner/repo branch [rebase]` conf grammar, and
-  `skills/rippled/commands/merge.md` (275 lines) as the resolver prompt. Not lifted: the
-  per-branch build gate, the on-box AI build fixer, the fingerprint cache, the GitHub App
-  token flow, the fork force-sync and the conf-drift guard.

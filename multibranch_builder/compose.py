@@ -18,8 +18,8 @@ from .merge import (
 
 MANIFEST_FILE = "manifest.json"
 TREE_DIR = "rippled"
-TRAILER_KEY = "Xrpld-Builder-Manifest"
-DEFAULT_GIT_NAME = "xrpld-builder"
+TRAILER_KEY = "Multibranch-Builder-Manifest"
+DEFAULT_GIT_NAME = "multibranch-builder"
 DEFAULT_GIT_EMAIL = "compose@xrplf.local"
 
 
@@ -87,7 +87,7 @@ def _run(cmd: list[str], cwd: str, check: bool = True) -> subprocess.CompletedPr
 
 
 def _log(msg: str) -> None:
-    print(f"[xrpld-builder] {msg}", flush=True)
+    print(f"[multibranch-builder] {msg}", flush=True)
 
 
 def plan(branches: list[BranchEntry], datagram: BranchEntry | None = None) -> list[BranchEntry]:
