@@ -1,10 +1,9 @@
-"""Merge one source ref into the checked-out tree: structural registry merge, then claude on conflict."""
+"""Merge one source ref into the checked-out tree; claude resolves what git and the drivers cannot."""
 
 from __future__ import annotations
 
 import os
 import re
-import shlex
 import shutil
 import subprocess
 import sys
@@ -23,18 +22,7 @@ OUTCOMES = (UP_TO_DATE, MERGED, AI_RESOLVED, CONFLICT)
 
 Resolver = Callable[[str, str, str], bool]
 
-_REGISTRY_ATTRIBUTES = (
-    "include/xrpl/protocol/detail/features.macro merge=xrplregistry",
-    "include/xrpl/protocol/detail/ledger_entries.macro merge=xrplregistry",
-    "include/xrpl/protocol/detail/transactions.macro merge=xrplregistry",
-    "include/xrpl/protocol/detail/sfields.macro merge=xrplregistry",
-    "include/xrpl/protocol/jss.h merge=xrplregistry",
-)
-
 _CONFLICT_MARKER_RE = re.compile(r"^(<{7} |={7}$|>{7} )", re.MULTILINE)
-_XRPLD = Path(__file__).parent / "targets" / "xrpld"
-_MERGE_GUIDE = _XRPLD / "merge.md"
-_DRIVER = _XRPLD / "registry_merge.py"
 
 
 def _run(cmd: list[str], cwd: str, check: bool = True) -> subprocess.CompletedProcess:
@@ -45,15 +33,14 @@ def _log(msg: str) -> None:
     print(f"[multibranch-builder] {msg}", file=sys.stderr, flush=True)
 
 
-def configure_registry_driver(repo_dir: str) -> None:
-    """Register the registry merge driver in .git/info/attributes and enable rerere, repo-local."""
-    _run(["git", "config", "merge.xrplregistry.name", "xrpld registry union merge"],
-         cwd=repo_dir, check=False)
-    _run(["git", "config", "merge.xrplregistry.driver",
-          f"{shlex.quote(sys.executable)} {shlex.quote(str(_DRIVER))} %O %A %B %P"],
-         cwd=repo_dir, check=False)
+def enable_rerere(repo_dir: str) -> None:
+    """Record and replay conflict resolutions within this clone."""
     _run(["git", "config", "rerere.enabled", "true"], cwd=repo_dir, check=False)
     _run(["git", "config", "rerere.autoUpdate", "true"], cwd=repo_dir, check=False)
+
+
+def write_attributes(repo_dir: str, lines: tuple[str, ...] | list[str]) -> None:
+    """Append gitattributes lines to .git/info/attributes (repo-local, never committed), once each."""
     attributes = os.path.join(repo_dir, ".git", "info", "attributes")
     os.makedirs(os.path.dirname(attributes), exist_ok=True)
     existing = ""
@@ -61,7 +48,7 @@ def configure_registry_driver(repo_dir: str) -> None:
         with open(attributes) as f:
             existing = f.read()
     with open(attributes, "a") as f:
-        for line in _REGISTRY_ATTRIBUTES:
+        for line in lines:
             if line not in existing:
                 f.write(line + "\n")
 
@@ -85,20 +72,21 @@ def files_with_conflict_markers(cwd: str, files: list[str]) -> list[str]:
     return remaining
 
 
-def merge_prompt(files: list[str], source_label: str, base_label: str) -> str:
-    """The claude prompt: the task, the conflicted files, then the merge.md guide."""
+def merge_prompt(files: list[str], source_label: str, base_label: str, guide: str | None = None) -> str:
+    """The claude prompt: the task, the conflicted files, then the kind's merge guide when given."""
     task = (
         "This repository has an in-progress git merge with conflicts. This merge layers "
         f"'{source_label}' on top of the already-composed tree based on '{base_label}' — KEEP "
         "BOTH the existing tree's logic and this branch's additions. For every conflicted file, "
         "remove all conflict markers (<<<<<<<, =======, >>>>>>>) with a correct combined result "
-        "that compiles. Then run `git add -A`. Verify `git diff --check` reports nothing. Do NOT "
-        "git commit and do NOT git merge --abort.\n\nConflicted files:\n" + "\n".join(files)
+        "that keeps both sides' behaviour and builds. Then run `git add -A`. Verify `git diff "
+        "--check` reports nothing. Do NOT git commit and do NOT git merge --abort.\n\n"
+        "Conflicted files:\n" + "\n".join(files)
     )
-    return task + "\n\n---\n\n" + _MERGE_GUIDE.read_text(encoding="utf-8")
+    return task + ("\n\n---\n\n" + guide if guide else "")
 
 
-def ai_resolve(cwd: str, source_label: str, base_label: str, *,
+def ai_resolve(cwd: str, source_label: str, base_label: str, *, guide_path: Path | None = None,
                budget_usd: float = CLAUDE_BUDGET_USD, timeout_s: int = CLAUDE_TIMEOUT_S) -> bool:
     """Run `claude -p` on the conflicted files; True when none remain unmerged or marked."""
     files = conflicted_files(cwd)
@@ -107,10 +95,11 @@ def ai_resolve(cwd: str, source_label: str, base_label: str, *,
     if shutil.which("claude") is None:
         _log("`claude` CLI not found — cannot resolve merge conflicts")
         return False
+    guide = guide_path.read_text(encoding="utf-8") if guide_path else None
     _log(f"AI-resolving {len(files)} conflicted file(s) from {source_label} via claude")
     try:
         subprocess.run(
-            ["claude", "-p", merge_prompt(files, source_label, base_label),
+            ["claude", "-p", merge_prompt(files, source_label, base_label, guide),
              "--permission-mode", "bypassPermissions",
              "--allowedTools", CLAUDE_TOOLS,
              "--add-dir", cwd,

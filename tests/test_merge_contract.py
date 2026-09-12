@@ -1,15 +1,16 @@
 """Tests for merge_source_into_current's four outcomes and the claude resolver call."""
 
 import subprocess
+from pathlib import Path
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 from multibranch_builder import merge
 from multibranch_builder.merge import (
     AI_RESOLVED, CONFLICT, MERGED, UP_TO_DATE, ai_resolve, files_with_conflict_markers,
     merge_prompt, merge_source_into_current,
 )
+
+XRPLD_GUIDE = Path(merge.__file__).parent / "targets" / "xrpld" / "merge.md"
 
 
 def _completed(returncode=0, stdout="", stderr=""):
@@ -84,10 +85,17 @@ def test_files_with_conflict_markers(tmp_path):
 
 
 def test_merge_prompt_names_files_and_carries_guide():
-    prompt = merge_prompt(["a.cpp", "b.h"], "XRPLF/rippled@x", "XRPLF/rippled@develop")
+    prompt = merge_prompt(["a.cpp", "b.h"], "XRPLF/rippled@x", "XRPLF/rippled@develop",
+                          guide=XRPLD_GUIDE.read_text())
     assert "a.cpp\nb.h" in prompt
     assert "XRPLF/rippled@x" in prompt
     assert "registry-number collisions" in prompt
+
+
+def test_merge_prompt_without_guide_is_the_task_alone():
+    prompt = merge_prompt(["a.ts"], "XRPLF/xrpl.js@x", "XRPLF/xrpl.js@main")
+    assert prompt.endswith("Conflicted files:\na.ts")
+    assert "registry-number collisions" not in prompt
 
 
 @patch("multibranch_builder.merge.shutil.which", return_value="/usr/bin/claude")
@@ -106,7 +114,8 @@ def test_ai_resolve_invokes_claude_with_budget_and_timeout(mock_which, tmp_path)
 
     with patch.object(merge, "_run", fake_run), patch("multibranch_builder.merge.subprocess.run") as claude:
         claude.return_value = _completed()
-        assert ai_resolve(str(tmp_path), "b", "develop", budget_usd=2.5, timeout_s=42) is True
+        assert ai_resolve(str(tmp_path), "b", "develop", guide_path=XRPLD_GUIDE,
+                          budget_usd=2.5, timeout_s=42) is True
     cmd = claude.call_args.args[0]
     assert cmd[:2] == ["claude", "-p"]
     assert cmd[cmd.index("--max-budget-usd") + 1] == "2.5"

@@ -21,11 +21,11 @@ on:
         required: false
         type: string
         default: ""
-      force-supported:
-        description: compile every amendment as Supported::Yes (ON) or as the tree declares (OFF)
+      options:
+        description: space-separated KEY=VALUE options for the conf's kind, passed as --set (e.g. force_supported=ON)
         required: false
         type: string
-        default: "OFF"
+        default: ""
       dry-run:
         description: print the plan and stop; no clone, build or push
         required: false
@@ -90,8 +90,8 @@ jobs:
       - name: Plan
         if: ${{ inputs.dry-run }}
         run: |
-          multibranch-builder compose --conf "${{ inputs.conf-path }}" --workdir "$WORKDIR" \
-            --force-supported "${{ inputs.force-supported }}" --dry-run | tee plan.txt
+          set -- ; for kv in ${{ inputs.options }}; do set -- "$@" --set "$kv"; done
+          multibranch-builder compose --conf "${{ inputs.conf-path }}" --workdir "$WORKDIR" "$@" --dry-run | tee plan.txt
           { echo '### compose plan (dry run)'; echo '```'; cat plan.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Compose
@@ -99,8 +99,8 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          multibranch-builder compose --conf "${{ inputs.conf-path }}" --workdir "$WORKDIR" \
-            --force-supported "${{ inputs.force-supported }}"
+          set -- ; for kv in ${{ inputs.options }}; do set -- "$@" --set "$kv"; done
+          multibranch-builder compose --conf "${{ inputs.conf-path }}" --workdir "$WORKDIR" "$@"
 
       - name: Per-branch outcome
         if: ${{ !inputs.dry-run && always() }}
@@ -121,9 +121,9 @@ jobs:
       - name: Build
         if: ${{ !inputs.dry-run }}
         run: |
-          multibranch-builder build --tree "$WORKDIR/rippled" --workdir "$WORKDIR" \
-            --project "${{ inputs.project }}" --ar "${{ inputs.ar }}" --pool "${{ inputs.pool }}" \
-            --force-supported "${{ inputs.force-supported }}" | tee build.txt
+          set -- ; for kv in ${{ inputs.options }}; do set -- "$@" --set "$kv"; done
+          multibranch-builder build --workdir "$WORKDIR" \
+            --project "${{ inputs.project }}" --ar "${{ inputs.ar }}" --pool "${{ inputs.pool }}" "$@" | tee build.txt
           { echo '### build'; echo "image: \`$(tail -n1 build.txt)\`"; } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Push
@@ -132,6 +132,5 @@ jobs:
           GITHUB_BOT_PAT: ${{ secrets.GITHUB_BOT_PAT }}
           GIT_SIGNING_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
         run: |
-          multibranch-builder push --tree "$WORKDIR/rippled" \
-            --manifest "$WORKDIR/manifest.json" --build "$WORKDIR/build.json" | tee push.txt
+          multibranch-builder push --workdir "$WORKDIR" | tee push.txt
           { echo '### push'; cat push.txt; } >> "$GITHUB_STEP_SUMMARY"

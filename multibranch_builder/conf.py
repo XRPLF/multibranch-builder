@@ -1,17 +1,18 @@
-"""The branch list that describes a composed xrpld tree."""
+"""The branch list that describes a composed tree."""
 
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 _HEX40 = re.compile(r"^[0-9a-f]{40}$")
 _GITHUB = re.compile(r"^https://github\.com/([^/]+)/([^/]+?)(?:\.git)?/?$")
+_HEADER_KEY = re.compile(r"^[a-z][a-z0-9_]*$")
 
 
 class ConfError(ValueError):
-    """The conf text does not follow `base`/`target`/entry grammar."""
+    """The conf text does not follow the header/entry grammar."""
 
 
 @dataclass(frozen=True)
@@ -83,15 +84,20 @@ class BranchEntry:
 @dataclass
 class Config:
     base: BranchEntry
-    target: BranchEntry | None
-    branches: list[BranchEntry]
+    target: BranchEntry | None = None
+    branches: list[BranchEntry] = field(default_factory=list)
+    kind: str | None = None
+    settings: dict[str, str] = field(default_factory=dict)
 
 
 def parse_config_text(text: str, source: str = "<conf>") -> Config:
-    """`base <owner/repo> <branch>`, optional `target <owner/repo> <branch>`, then
-    `<owner/repo> <branch> [rebase]` per line; `#` starts a comment."""
+    """Headers `base <owner/repo> <branch>` (required), `target <owner/repo> <branch>`,
+    `kind <name>` and `<setting> <value>` for the kind; then `<owner/repo> <branch> [rebase]`
+    per line; `#` starts a comment."""
     base: BranchEntry | None = None
     target: BranchEntry | None = None
+    kind: str | None = None
+    settings: dict[str, str] = {}
     branches: list[BranchEntry] = []
     for lineno, raw in enumerate(text.splitlines(), 1):
         line = raw.split("#", 1)[0].strip()
@@ -99,20 +105,34 @@ def parse_config_text(text: str, source: str = "<conf>") -> Config:
             continue
         parts = line.split()
         where = f"{source}:{lineno}"
-        if parts[0] in ("base", "target"):
-            if len(parts) != 3 or "/" not in parts[1]:
-                raise ConfError(f"{where}: expected `{parts[0]} owner/repo branch`")
-            entry = BranchEntry.from_slug(parts[1], parts[2])
-            if parts[0] == "base":
-                if base is not None:
-                    raise ConfError(f"{where}: second `base` line")
-                base = entry
+        if "/" not in parts[0]:
+            key = parts[0]
+            if not _HEADER_KEY.match(key) or len(parts) < 2:
+                raise ConfError(f"{where}: expected `owner/repo branch [rebase]` or `<setting> <value>`")
+            if key in ("base", "target"):
+                if len(parts) != 3 or "/" not in parts[1]:
+                    raise ConfError(f"{where}: expected `{key} owner/repo branch`")
+                entry = BranchEntry.from_slug(parts[1], parts[2])
+                if key == "base":
+                    if base is not None:
+                        raise ConfError(f"{where}: second `base` line")
+                    base = entry
+                else:
+                    if target is not None:
+                        raise ConfError(f"{where}: second `target` line")
+                    target = entry
+            elif key == "kind":
+                if len(parts) != 2:
+                    raise ConfError(f"{where}: expected `kind <name>`")
+                if kind is not None:
+                    raise ConfError(f"{where}: second `kind` line")
+                kind = parts[1]
             else:
-                if target is not None:
-                    raise ConfError(f"{where}: second `target` line")
-                target = entry
+                if key in settings:
+                    raise ConfError(f"{where}: second `{key}` line")
+                settings[key] = " ".join(parts[1:])
             continue
-        if len(parts) not in (2, 3) or "/" not in parts[0]:
+        if len(parts) not in (2, 3):
             raise ConfError(f"{where}: expected `owner/repo branch [rebase]`")
         if len(parts) == 3 and parts[2].lower() != "rebase":
             raise ConfError(f"{where}: third field must be `rebase`, got {parts[2]!r}")
@@ -125,7 +145,7 @@ def parse_config_text(text: str, source: str = "<conf>") -> Config:
         if entry.label in seen:
             raise ConfError(f"{source}: duplicate entry {entry.label}")
         seen.add(entry.label)
-    return Config(base=base, target=target, branches=branches)
+    return Config(base=base, target=target, branches=branches, kind=kind, settings=settings)
 
 
 def parse_config(path: str | Path) -> Config:

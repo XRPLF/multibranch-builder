@@ -1,4 +1,4 @@
-"""compose() against local git repositories: clean merge, resolver merge, conflict."""
+"""compose() against local git repositories: clean merge, resolver merge, conflict, prepare."""
 
 import json
 import subprocess
@@ -6,8 +6,12 @@ import subprocess
 import pytest
 
 from multibranch_builder import compose as compose_mod
-from multibranch_builder.compose import ComposeError, Manifest, compose, plan
-from multibranch_builder.conf import BranchEntry
+from multibranch_builder.compose import ComposeError, Manifest, compose
+from multibranch_builder.conf import BranchEntry, Config
+from multibranch_builder.targets import for_name
+
+XRPLD = for_name("xrpld")
+BASE = BranchEntry("XRPLF", "rippled", "develop")
 
 
 def git(cwd, *args, **kw):
@@ -46,20 +50,17 @@ def resolve_by_taking_theirs(cwd, branch_label, base_label):
     return True
 
 
-def test_plan_puts_datagram_first():
-    a, b, dg = BranchEntry("o", "r", "a"), BranchEntry("o", "r", "b"), BranchEntry("o", "r", "dg")
-    assert plan([a, b], dg) == [dg, a, b]
-    assert plan([a, b]) == [a, b]
+def _config(*branches, target=None):
+    return Config(BASE, target, list(branches))
 
 
 def test_compose_clean_and_resolved(upstream, tmp_path):
-    base = BranchEntry("XRPLF", "rippled", "develop")
     branches = [BranchEntry("XRPLF", "rippled", "feat/clean"),
                 BranchEntry("XRPLF", "rippled", "feat/conflict", rebase=True)]
     target = BranchEntry("Transia-RnD", "rippled", "alphanet")
     work = tmp_path / "work"
-    manifest = compose(base, branches, work, target=target, force_supported="ON",
-                       resolver=resolve_by_taking_theirs)
+    manifest = compose(_config(*branches, target=target), work, kind=XRPLD,
+                       options={"force_supported": "ON"}, resolver=resolve_by_taking_theirs)
 
     assert manifest.base == "XRPLF/rippled@develop"
     assert manifest.base_sha == git(upstream, "rev-parse", "develop")
@@ -67,7 +68,9 @@ def test_compose_clean_and_resolved(upstream, tmp_path):
     assert manifest.branches[0].sha == git(upstream, "rev-parse", "feat/clean")
     assert manifest.branches[1].rebase is True
     assert manifest.target == "Transia-RnD/rippled@alphanet"
-    assert manifest.force_supported == "ON"
+    assert (manifest.kind, manifest.tree_dir) == ("xrpld", "rippled")
+    assert manifest.options == {"force_supported": "ON"}
+    assert manifest.prepared == {}
     tree = work / "rippled"
     assert manifest.composed_sha == git(tree, "rev-parse", "HEAD")
     assert (tree / "clean.txt").read_text() == "clean\n"
@@ -81,16 +84,16 @@ def test_compose_clean_and_resolved(upstream, tmp_path):
     assert loaded == manifest
     assert loaded.trailer().startswith("Multibranch-Builder-Manifest: {")
     assert json.loads(loaded.trailer().split(": ", 1)[1])["composed_sha"] == manifest.composed_sha
+    assert "**kind** `xrpld`" in loaded.markdown()
     assert "| XRPLF/rippled | feat/clean |" in loaded.markdown()
 
 
 def test_compose_conflict_writes_manifest_then_raises(upstream, tmp_path):
-    base = BranchEntry("XRPLF", "rippled", "develop")
     branches = [BranchEntry("XRPLF", "rippled", "feat/conflict"),
                 BranchEntry("XRPLF", "rippled", "feat/clean")]
     work = tmp_path / "work"
     with pytest.raises(ComposeError, match="feat/conflict"):
-        compose(base, branches, work, resolver=lambda cwd, b, d: False)
+        compose(_config(*branches), work, kind=XRPLD, options={}, resolver=lambda cwd, b, d: False)
     manifest = Manifest.load(work / "manifest.json")
     assert [b.outcome for b in manifest.branches] == ["conflict", "merged"]
     assert manifest.failed == ["XRPLF/rippled@feat/conflict"]
@@ -98,18 +101,79 @@ def test_compose_conflict_writes_manifest_then_raises(upstream, tmp_path):
 
 
 def test_compose_up_to_date_branch(upstream, tmp_path):
-    base = BranchEntry("XRPLF", "rippled", "develop")
-    manifest = compose(base, [BranchEntry("XRPLF", "rippled", "develop")], tmp_path / "work",
-                       resolver=lambda cwd, b, d: False)
+    manifest = compose(_config(BranchEntry("XRPLF", "rippled", "develop")), tmp_path / "work",
+                       kind=XRPLD, options={}, resolver=lambda cwd, b, d: False)
     assert manifest.branches[0].outcome == "up-to-date"
     assert manifest.composed_sha == manifest.base_sha
 
 
 def test_compose_accepts_relative_workdir(upstream, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    base = BranchEntry("XRPLF", "rippled", "develop")
-    manifest = compose(base, [BranchEntry("XRPLF", "rippled", "feat/clean")], "work",
-                       resolver=lambda cwd, b, d: False)
+    manifest = compose(_config(BranchEntry("XRPLF", "rippled", "feat/clean")), "work",
+                       kind=XRPLD, options={}, resolver=lambda cwd, b, d: False)
     assert (tmp_path / "work" / "rippled" / "clean.txt").exists()
     assert not (tmp_path / "work" / "work").exists()
     assert manifest.branches[0].outcome == "merged"
+
+
+class PreparingKind:
+    """A kind whose prepare step writes a generated file, or fails."""
+
+    name = "fake"
+    tree_dir = "tree"
+    default_branch = "develop"
+    merge_guide = None
+    options: dict = {}
+    settings: dict = {}
+
+    def __init__(self, fail=False):
+        self.fail = fail
+
+    def validate_options(self, options):
+        return dict(options)
+
+    def validate_settings(self, settings):
+        return None
+
+    def configure_merge(self, tree):
+        return None
+
+    def plan(self, branches, options):
+        return list(branches)
+
+    def prepare(self, tree, settings, options):
+        if self.fail:
+            raise ComposeError("rpc down")
+        (tree / "gen.txt").write_text(settings.get("gen", "generated") + "\n")
+        return {"gen": "1"}, ["gen.txt"]
+
+    def build(self, req):
+        return {"status": "SUCCESS"}
+
+    def image_suffix(self, options):
+        return ""
+
+
+def test_compose_commits_prepare_output_before_composed_sha(upstream, tmp_path):
+    work = tmp_path / "work"
+    manifest = compose(_config(BranchEntry("XRPLF", "rippled", "feat/clean")), work,
+                       kind=PreparingKind(), options={}, resolver=lambda cwd, b, d: False)
+    tree = work / "tree"
+    assert (manifest.kind, manifest.tree_dir) == ("fake", "tree")
+    assert manifest.prepared == {"gen": "1"}
+    assert manifest.composed_sha == git(tree, "rev-parse", "HEAD")
+    assert git(tree, "status", "--porcelain") == ""
+    assert git(tree, "log", "-1", "--format=%s") == "prepare: fake gen.txt"
+    assert git(tree, "rev-list", "--count", "--first-parent", f"{manifest.base_sha}..HEAD") == "2"
+    assert "**gen** `1`" in manifest.markdown()
+
+
+def test_compose_prepare_failure_writes_manifest_with_empty_composed_sha(upstream, tmp_path):
+    work = tmp_path / "work"
+    with pytest.raises(ComposeError, match="rpc down"):
+        compose(_config(BranchEntry("XRPLF", "rippled", "feat/clean")), work,
+                kind=PreparingKind(fail=True), options={}, resolver=lambda cwd, b, d: False)
+    manifest = Manifest.load(work / "manifest.json")
+    assert manifest.composed_sha == ""
+    assert manifest.prepared == {"error": "rpc down"}
+    assert manifest.failed == []
