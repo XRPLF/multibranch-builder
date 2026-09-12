@@ -8,8 +8,8 @@ version = "0.1.0"
 description = "Compose a multi-branch xrpld tree, build it on Cloud Build, push it GPG-signed."
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["pyyaml>=6", "requests>=2.31"]
 
+dependencies = ["requests>=2.31"]
 [project.optional-dependencies]
 dev = ["pytest>=8"]
 
