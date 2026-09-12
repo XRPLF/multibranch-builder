@@ -118,7 +118,8 @@ def cmd_build(args: argparse.Namespace) -> int:
     record.update(kind=kind.name, tag=tag, ar=args.ar, project=args.project, pool=pool, options=options)
     write_build(workdir, record)
     if record.get("status") != SUCCESS:
-        sys.exit(f"[multibranch-builder] build {record.get('build_id', '')} finished {record.get('status')}")
+        what = record.get("summary") or f"build {record.get('build_id', '')}"
+        sys.exit(f"[multibranch-builder] {what}: finished {record.get('status')}")
     print(record.get("image") or record.get("summary", ""))
     return 0
 
