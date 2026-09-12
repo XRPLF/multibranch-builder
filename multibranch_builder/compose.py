@@ -11,6 +11,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from .conf import Config
+from .errors import ComposeError
 from .merge import AI_RESOLVED, CONFLICT, MERGED, Resolver, ai_resolve, merge_source_into_current
 from .targets.base import Kind
 
@@ -18,10 +19,6 @@ MANIFEST_FILE = "manifest.json"
 TRAILER_KEY = "Multibranch-Builder-Manifest"
 DEFAULT_GIT_NAME = "multibranch-builder"
 DEFAULT_GIT_EMAIL = "compose@xrplf.local"
-
-
-class ComposeError(RuntimeError):
-    """The tree could not be composed as described."""
 
 
 @dataclass

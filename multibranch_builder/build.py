@@ -7,12 +7,10 @@ import re
 import subprocess
 from pathlib import Path
 
+from .errors import BuildError
+
 BUILD_FILE = "build.json"
 _HEX40 = re.compile(r"^[0-9a-f]{40}$")
-
-
-class BuildError(RuntimeError):
-    """A build could not be submitted or did not finish SUCCESS."""
 
 
 def _run(cmd: list[str], cwd: str | None = None, check: bool = True) -> subprocess.CompletedProcess:

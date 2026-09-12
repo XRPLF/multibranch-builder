@@ -36,6 +36,14 @@ the base repository (`rippled` or `xrpld*` means xrpld). Each kind is a package 
 | kind | tree_dir | default branch | options | settings | prepare | build |
 |---|---|---|---|---|---|---|
 | `xrpld` | `rippled` | `develop` | `force_supported` ON\|OFF, `datagram` | none | none | Cloud Build with the dockerfiles under `targets/xrpld/cloudbuild/` |
+| `xrpl_js` | `xrpl.js` | `main` | none | `definitions` (required) | writes the node's `server_definitions` over `packages/ripple-binary-codec/src/enums/definitions.json` and regenerates `package-lock.json` | checks the tree is clean and the definitions carry the five keys the codec loads plus `hash` |
+
+The xrpl_js kind takes `definitions <json-rpc url>` from the conf and calls `server_definitions`
+and `server_info` on that node, so it composes against a node that is already running the
+branches the SDK tree merges, and the manifest's `prepared.build_version` names that node.
+`definitions.json` and `package-lock.json` carry a `merge=ours` attribute: they keep the base
+tree's content through every merge and get their composed content from the prepare step, which
+is why neither reaches the conflict resolver.
 
 ## Conflict handling
 
@@ -82,7 +90,7 @@ XRPLF/rippled dangell7/datagram
 ```
 
 Any other `<setting> <value>` header line is handed to the kind, which accepts or rejects it
-(the xrpld kind accepts none). `rebase` is parsed and recorded in the manifest
+(the xrpld kind accepts none; the xrpl_js kind requires `definitions <json-rpc url>`). `rebase` is parsed and recorded in the manifest
 (`branches[].rebase`) for the network repos that keep a branch in step with develop;
 `compose` itself does not act on it.
 
@@ -175,6 +183,7 @@ Read at call time, never at import, never printed.
 - `gcloud` (Cloud SDK) authenticated against the build project — xrpld `build`
 - `gh` authenticated — xrpld `build --src` CI image lookup (falls back loudly without it)
 - `claude` (`npm install -g @anthropic-ai/claude-code`) — `compose` when a merge conflicts
+- `npm` — xrpl_js `compose`, to regenerate `package-lock.json` (recorded as not refreshed without it)
 - Python 3.11+
 
 ## Reusable workflow

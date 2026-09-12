@@ -21,6 +21,7 @@ include = ["multibranch_builder*"]
 
 [tool.setuptools.package-data]
 "multibranch_builder.targets.xrpld" = ["merge.md", "cloudbuild/*"]
+"multibranch_builder.targets.xrpl_js" = ["merge.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
