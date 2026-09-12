@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import subprocess
 from pathlib import Path
 
@@ -10,7 +9,9 @@ from ...conf import BranchEntry, ConfError
 from ...errors import ComposeError
 from ...merge import enable_rerere, write_attributes
 from ..base import BuildRequest, check_keys
-from .definitions import DEFINITIONS_PATH, LOADER_KEYS, LOCK_PATH, prepare
+from .definitions import (
+    DEFINITIONS_PATH, LOCK_PATH, NPM_LOG, check_definitions, npm_build, prepare,
+)
 
 _HERE = Path(__file__).parent
 _OURS_ATTRIBUTES = (
@@ -56,25 +57,21 @@ class XrplJsKind:
         return prepare(tree, settings, options)
 
     def build(self, req: BuildRequest) -> dict:
-        """Check the composed tree carries definitions the binary codec can load."""
+        """Check the tree carries definitions the binary codec can load, then install, build and test it."""
         tree = req.tree
         if tree is None:
             raise ComposeError(f"{self.name} builds a composed tree, not a single branch")
-        path = tree / DEFINITIONS_PATH
-        try:
-            definitions = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError) as e:
-            return {"status": "FAILURE", "step": "verify", "summary": f"{DEFINITIONS_PATH}: {e}"}
-        missing = [k for k in (*LOADER_KEYS, "hash") if k not in definitions]
-        if missing:
-            return {"status": "FAILURE", "step": "verify",
-                    "summary": f"{DEFINITIONS_PATH} is missing {', '.join(missing)}"}
+        problem, definitions_hash = check_definitions(tree)
+        if problem:
+            return {"status": "FAILURE", "step": "verify", "summary": problem}
         dirty = _git(str(tree), "status", "--porcelain").stdout.strip()
         if dirty:
             return {"status": "FAILURE", "step": "verify",
                     "summary": f"the composed tree has uncommitted changes: {dirty.splitlines()[0]}"}
-        return {"status": "SUCCESS", "step": "verify",
-                "summary": f"definitions {definitions['hash'][:12]} verified"}
+        record = npm_build(tree, tree.parent / NPM_LOG)
+        record["definitions_hash"] = definitions_hash
+        record["summary"] = f"definitions {definitions_hash[:12]}, {record['summary']}"
+        return record
 
     def image_suffix(self, options: dict[str, str]) -> str:
         return ""

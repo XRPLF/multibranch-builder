@@ -21,7 +21,9 @@ Each subcommand reads and writes one work directory:
   manifest.json    what compose did: base, base_sha, kind, tree_dir, branches[{repo, branch, sha, outcome, rebase}],
                    composed_sha, target, options, prepared
   build.json       what build did: status, kind, options, tag, build_server, build_version, composed_sha,
-                   plus the kind's own fields (xrpld: image, build_id, ci_image, ar, project, pool)
+                   plus the kind's own fields (xrpld: image, build_id, ci_image, ar, project, pool;
+                   xrpl_js: step, node, npm, commands, failed, log, definitions_hash, summary)
+  npm-build.log    every npm command the xrpl_js build ran, and its output
 ```
 
 ## Kinds
@@ -37,7 +39,7 @@ is a package under
 | kind | tree_dir | default branch | options | settings | prepare | build |
 |---|---|---|---|---|---|---|
 | `xrpld` | `rippled` | `develop` | `force_supported` ON\|OFF, `datagram` | none | none | Cloud Build with the dockerfiles under `targets/xrpld/cloudbuild/` |
-| `xrpl_js` | `xrpl.js` | `main` | none | `definitions` (required) | writes the node's `server_definitions` over `packages/ripple-binary-codec/src/enums/definitions.json` and regenerates `package-lock.json` | checks the tree is clean and the definitions carry the five keys the codec loads plus `hash` |
+| `xrpl_js` | `xrpl.js` | `main` | none | `definitions` (required) | writes the node's `server_definitions` over `packages/ripple-binary-codec/src/enums/definitions.json` and regenerates `package-lock.json` | checks the tree is clean and its definitions load, then `npm ci`, `npm run build`, `npm test` into `npm-build.log` |
 
 The xrpl_js kind takes `definitions <json-rpc url>` from the conf and calls `server_definitions`
 and `server_info` on that node, so it composes against a node that is already running the
@@ -184,7 +186,8 @@ Read at call time, never at import, never printed.
 - `gcloud` (Cloud SDK) authenticated against the build project — xrpld `build`
 - `gh` authenticated — xrpld `build --src` CI image lookup (falls back loudly without it)
 - `claude` (`npm install -g @anthropic-ai/claude-code`) — `compose` when a merge conflicts
-- `npm` — xrpl_js `compose`, to regenerate `package-lock.json` (recorded as not refreshed without it)
+- `npm` — xrpl_js `compose`, to regenerate `package-lock.json` (recorded as not refreshed without
+  it), and xrpl_js `build`, which needs it (node at the version the tree's `.nvmrc` names)
 - Python 3.11+
 
 ## Reusable workflow

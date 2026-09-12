@@ -8,7 +8,7 @@ import pytest
 
 from multibranch_builder import cli
 from multibranch_builder.conf import ConfError, parse_config_text
-from multibranch_builder.errors import ComposeError
+from multibranch_builder.errors import BuildError, ComposeError
 from multibranch_builder.targets import KINDS, for_base, for_config
 from multibranch_builder.targets.base import BuildRequest
 from multibranch_builder.targets.xrpl_js import definitions as defs
@@ -224,12 +224,63 @@ def _verify(tree):
     return KIND.build(BuildRequest(options={}, tag="t", tree=tree))
 
 
-def test_verify_passes_a_clean_tree_with_loadable_definitions(repo):
+def _built(repo):
+    """The repo with committed, loadable definitions, so build reaches the npm step."""
     (repo / DEFS).write_text(json.dumps({k: v for k, v in _result().items() if k != "status"}, indent=2) + "\n")
     git(repo, "commit", "-q", "-am", "definitions")
-    record = _verify(repo)
+    return repo
+
+
+def _fake_run(fails=""):
+    """subprocess.run for the whole module: git stays quiet, `--version` answers, npm can fail."""
+    def run(command, **kwargs):
+        text = " ".join(command)
+        if command[0] == "git" or text.endswith("--version"):
+            return MagicMock(returncode=0, stdout="v22.1.0\n" if "--version" in text else "")
+        return MagicMock(returncode=1 if text == fails else 0, stdout="")
+    return run
+
+
+def test_build_runs_npm_ci_build_and_test_in_order(repo):
+    tree = _built(repo)
+    with patch(f"{MODULE}.shutil.which", return_value="/usr/bin/npm"), \
+         patch(f"{MODULE}.subprocess.run", side_effect=_fake_run()) as run:
+        record = _verify(tree)
+    commands = [c.args[0] for c in run.call_args_list if c.args[0][0] == "npm" and "--version" not in c.args[0]]
+    assert commands == [["npm", "ci"], ["npm", "run", "build"], ["npm", "test"]]
+    assert run.call_args_list[-1].kwargs["cwd"] == tree
     assert record["status"] == "SUCCESS"
-    assert record["summary"] == "definitions C685734F5FEB verified"
+    assert record["failed"] is None
+    assert record["definitions_hash"] == "C685734F5FEB0123"
+    assert record["summary"] == "definitions C685734F5FEB, 3 npm commands passed"
+    assert (tree.parent / "npm-build.log").read_text().splitlines() == ["$ npm ci", "$ npm run build", "$ npm test"]
+
+
+def test_build_stops_at_the_first_failing_npm_command(repo):
+    tree = _built(repo)
+    with patch(f"{MODULE}.shutil.which", return_value="/usr/bin/npm"), \
+         patch(f"{MODULE}.subprocess.run", side_effect=_fake_run(fails="npm run build")):
+        record = _verify(tree)
+    assert record["status"] == "FAILURE"
+    assert record["failed"] == "npm run build"
+    assert "npm run build exited 1" in record["summary"]
+    assert "npm test" not in (tree.parent / "npm-build.log").read_text()
+
+
+def test_build_without_npm_is_a_build_error(repo):
+    tree = _built(repo)
+    with patch(f"{MODULE}.shutil.which", return_value=None):
+        with pytest.raises(BuildError, match="npm not found"):
+            _verify(tree)
+
+
+def test_build_records_the_node_and_npm_versions(repo):
+    tree = _built(repo)
+    with patch(f"{MODULE}.shutil.which", return_value="/usr/bin/npm"), \
+         patch(f"{MODULE}.subprocess.run", side_effect=_fake_run()):
+        record = _verify(tree)
+    assert record["node"] == "v22.1.0" and record["npm"] == "v22.1.0"
+    assert record["log"].endswith("npm-build.log")
 
 
 def test_verify_fails_a_dirty_tree(repo):
