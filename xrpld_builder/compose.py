@@ -112,7 +112,7 @@ def compose(base: BranchEntry, branches: list[BranchEntry], workdir: str | Path,
     Every branch is attempted even after a conflict so the manifest shows each outcome; a
     manifest with any `conflict` is written and then raised as ComposeError.
     """
-    workdir = Path(workdir)
+    workdir = Path(workdir).resolve()
     workdir.mkdir(parents=True, exist_ok=True)
     src = str(workdir / TREE_DIR)
     if os.path.isdir(src):

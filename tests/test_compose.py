@@ -103,3 +103,13 @@ def test_compose_up_to_date_branch(upstream, tmp_path):
                        resolver=lambda cwd, b, d: False)
     assert manifest.branches[0].outcome == "up-to-date"
     assert manifest.composed_sha == manifest.base_sha
+
+
+def test_compose_accepts_relative_workdir(upstream, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    base = BranchEntry("XRPLF", "rippled", "develop")
+    manifest = compose(base, [BranchEntry("XRPLF", "rippled", "feat/clean")], "work",
+                       resolver=lambda cwd, b, d: False)
+    assert (tmp_path / "work" / "rippled" / "clean.txt").exists()
+    assert not (tmp_path / "work" / "work").exists()
+    assert manifest.branches[0].outcome == "merged"
