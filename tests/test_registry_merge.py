@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from multibranch_builder.registry_merge import merge3, parse
+from multibranch_builder.targets.xrpld.registry_merge import merge3, parse
 
-DRIVER = Path(__file__).parents[1] / "multibranch_builder" / "registry_merge.py"
+DRIVER = Path(__file__).parents[1] / "multibranch_builder" / "targets" / "xrpld" / "registry_merge.py"
 
 
 FEATURES_BASE = """\

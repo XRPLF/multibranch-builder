@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable
 
 CLAUDE_TOOLS = "Read,Edit,Bash,Glob,Grep"
 CLAUDE_BUDGET_USD = 5.0
@@ -32,8 +32,9 @@ _REGISTRY_ATTRIBUTES = (
 )
 
 _CONFLICT_MARKER_RE = re.compile(r"^(<{7} |={7}$|>{7} )", re.MULTILINE)
-_MERGE_GUIDE = Path(__file__).with_name("merge.md")
-_DRIVER = Path(__file__).with_name("registry_merge.py")
+_XRPLD = Path(__file__).parent / "targets" / "xrpld"
+_MERGE_GUIDE = _XRPLD / "merge.md"
+_DRIVER = _XRPLD / "registry_merge.py"
 
 
 def _run(cmd: list[str], cwd: str, check: bool = True) -> subprocess.CompletedProcess:
@@ -153,39 +154,3 @@ def merge_source_into_current(repo_dir: str, source_ref: str, branch_label: str,
         return AI_RESOLVED
     _run(["git", "merge", "--abort"], cwd=repo_dir, check=False)
     return CONFLICT
-
-
-def plan_integration(
-    manifest: Optional[dict],
-    develop_sha: str,
-    develop_extends_manifest: bool,
-    alphanet_sha: str,
-    branches: dict,
-    from_scratch: bool,
-) -> tuple[str, list[str]]:
-    """Decide fast-path vs full rebuild from the last manifest; pure, ancestry checks are passed in.
-
-    `branches` maps key -> {"tip": sha, "extends_manifest": bool}. Returns ("full", []) or
-    ("fast", [keys to merge]).
-    """
-    if from_scratch or not manifest:
-        return "full", []
-    if manifest.get("alphanet") != alphanet_sha:
-        return "full", []
-    if not develop_extends_manifest:
-        return "full", []
-    for key in manifest.get("branches", {}):
-        if key not in branches:
-            return "full", []
-    to_merge = []
-    for key, state in branches.items():
-        prev = manifest.get("branches", {}).get(key)
-        if prev is None:
-            to_merge.append(key)
-            continue
-        if prev == state["tip"]:
-            continue
-        if not state["extends_manifest"]:
-            return "full", []
-        to_merge.append(key)
-    return "fast", to_merge

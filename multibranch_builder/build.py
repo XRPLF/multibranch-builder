@@ -21,7 +21,7 @@ DEFAULT_CI_IMAGE = f"{CI_IMAGE_REPO}:sha-2e25435"
 STRATEGY_MATRIX = ".github/scripts/strategy-matrix/linux.json"
 BUILD_FILE = "build.json"
 _HEX40 = re.compile(r"^[0-9a-f]{40}$")
-_CLOUDBUILD = Path(__file__).with_name("cloudbuild")
+_CLOUDBUILD = Path(__file__).parent / "targets" / "xrpld" / "cloudbuild"
 
 
 class BuildError(RuntimeError):

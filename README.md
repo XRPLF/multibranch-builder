@@ -35,7 +35,7 @@ outcomes recorded per branch in the manifest:
 
 Two mechanisms run before claude sees a conflict:
 
-- `multibranch_builder/registry_merge.py` is registered as the repo-local merge driver
+- `multibranch_builder/targets/xrpld/registry_merge.py` is registered as the repo-local merge driver
   (`.git/info/attributes`, never committed) for `features.macro`, `ledger_entries.macro`,
   `transactions.macro`, `sfields.macro` and `jss.h`. It unions independent entries and
   renumbers an incoming entry whose numeric id collides. Anything it cannot prove safe stays
@@ -45,7 +45,7 @@ Two mechanisms run before claude sees a conflict:
 What remains goes to the local `claude` CLI: `claude -p <prompt> --permission-mode
 bypassPermissions --allowedTools Read,Edit,Bash,Glob,Grep --add-dir <tree> --max-budget-usd 5`
 under a one-hour subprocess timeout. The prompt lists the conflicted files and appends
-`multibranch_builder/merge.md`, the resolution guide (registry-number collisions, namespace and
+`multibranch_builder/targets/xrpld/merge.md`, the resolution guide (registry-number collisions, namespace and
 file-move rules, the per-file strategy). After claude returns, files that still contain
 conflict markers or stay unmerged make the outcome `conflict`.
 
