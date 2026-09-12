@@ -2,7 +2,7 @@
 
 import pytest
 
-from xrpld_compose.conf import BranchEntry, ConfError, parse_config, parse_config_text
+from xrpld_builder.conf import BranchEntry, ConfError, parse_config, parse_config_text
 
 ALPHANET = """\
 # alphanet

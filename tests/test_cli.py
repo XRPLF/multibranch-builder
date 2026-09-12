@@ -5,8 +5,8 @@ from unittest.mock import patch
 
 import pytest
 
-from xrpld_compose import cli
-from xrpld_compose.compose import BranchOutcome, Manifest
+from xrpld_builder import cli
+from xrpld_builder.compose import BranchOutcome, Manifest
 
 CONF = """\
 base XRPLF/rippled develop
@@ -19,7 +19,7 @@ XRPLF/rippled dangell7/subscriptions
 def test_compose_dry_run_prints_plan_without_cloning(tmp_path, capsys):
     conf = tmp_path / "alphanet.conf"
     conf.write_text(CONF)
-    with patch("xrpld_compose.cli.compose") as mock_compose:
+    with patch("xrpld_builder.cli.compose") as mock_compose:
         rc = cli.main(["compose", "--conf", str(conf), "--workdir", str(tmp_path / "w"), "--dry-run",
                        "--datagram", "XRPLF/rippled@dangell7/datagram"])
     assert rc == 0
@@ -82,7 +82,7 @@ def test_push_requires_a_target(tmp_path):
         cli.main(_push_args(tmp_path))
 
 
-@patch("xrpld_compose.cli.git_push")
+@patch("xrpld_builder.cli.git_push")
 def test_push_signs_commits_trailer_and_force_pushes_with_lease(mock_gp, tmp_path, capsys):
     manifest = _files(tmp_path)
     mock_gp._run.return_value.stdout = "c" * 40 + "\n"
@@ -98,7 +98,7 @@ def test_push_signs_commits_trailer_and_force_pushes_with_lease(mock_gp, tmp_pat
     assert capsys.readouterr().out.strip() == f"pushed {'e' * 40} -> Transia-RnD/rippled@alphanet"
 
 
-@patch("xrpld_compose.cli.git_push")
+@patch("xrpld_builder.cli.git_push")
 def test_push_refuses_tree_that_is_not_the_manifest(mock_gp, tmp_path):
     _files(tmp_path)
     mock_gp._run.return_value.stdout = "f" * 40 + "\n"

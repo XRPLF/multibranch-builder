@@ -1,4 +1,4 @@
-# Compile a pre-composed xrpld source tree (uploaded by `xrpld-compose build --tree`). Cloud
+# Compile a pre-composed xrpld source tree (uploaded by `xrpld-builder build --tree`). Cloud
 # Build only COPYs the already-merged/resolved source and compiles — no clone, no merge, no claude.
 # Machine via submit flags: --worker-pool + --region (pool) or --machine-type (default pool).
 

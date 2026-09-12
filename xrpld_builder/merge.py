@@ -41,7 +41,7 @@ def _run(cmd: list[str], cwd: str, check: bool = True) -> subprocess.CompletedPr
 
 
 def _log(msg: str) -> None:
-    print(f"[xrpld-compose] {msg}", file=sys.stderr, flush=True)
+    print(f"[xrpld-builder] {msg}", file=sys.stderr, flush=True)
 
 
 def configure_registry_driver(repo_dir: str) -> None:

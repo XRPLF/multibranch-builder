@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from xrpld_compose.registry_merge import merge3, parse
+from xrpld_builder.registry_merge import merge3, parse
 
-DRIVER = Path(__file__).parents[1] / "xrpld_compose" / "registry_merge.py"
+DRIVER = Path(__file__).parents[1] / "xrpld_builder" / "registry_merge.py"
 
 
 FEATURES_BASE = """\

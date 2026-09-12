@@ -2,7 +2,7 @@
 # matching rippled CI so conan DOWNLOADS the prebuilt deps (no recompiling boost/rocksdb).
 # The datagram commit is fetched + merged inside the build (public, read-only).
 #
-# Run: xrpld-compose build --src <github-url> [--datagram <github-url>] ...
+# Run: xrpld-builder build --src <github-url> [--datagram <github-url>] ...
 
 substitutions:
   _REPO: "https://github.com/XRPLF/rippled.git"

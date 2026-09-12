@@ -5,9 +5,9 @@ import subprocess
 
 import pytest
 
-from xrpld_compose import compose as compose_mod
-from xrpld_compose.compose import ComposeError, Manifest, compose, plan
-from xrpld_compose.conf import BranchEntry
+from xrpld_builder import compose as compose_mod
+from xrpld_builder.compose import ComposeError, Manifest, compose, plan
+from xrpld_builder.conf import BranchEntry
 
 
 def git(cwd, *args, **kw):
@@ -79,7 +79,7 @@ def test_compose_clean_and_resolved(upstream, tmp_path):
 
     loaded = Manifest.load(work / "manifest.json")
     assert loaded == manifest
-    assert loaded.trailer().startswith("Xrpld-Compose-Manifest: {")
+    assert loaded.trailer().startswith("Xrpld-Builder-Manifest: {")
     assert json.loads(loaded.trailer().split(": ", 1)[1])["composed_sha"] == manifest.composed_sha
     assert "| XRPLF/rippled | feat/clean |" in loaded.markdown()
 

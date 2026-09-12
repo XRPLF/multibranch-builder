@@ -33,7 +33,7 @@ def _run(cmd: list[str], cwd: str | None = None, check: bool = True) -> subproce
 
 
 def _warn(msg: str) -> None:
-    print(f"[xrpld-compose] WARNING: {msg}", file=sys.stderr, flush=True)
+    print(f"[xrpld-builder] WARNING: {msg}", file=sys.stderr, flush=True)
 
 
 def _image_from_matrix(text: str) -> str | None:
@@ -143,11 +143,11 @@ def submit_tree(tree: str | Path, project: str, ar: str, tag: str, *, pool: str 
     """Upload `tree` (without .git) and compile it with composed.dockerfile."""
     image = f"{ar}/xrpld:{tag}"
     ci_image = ci_image or ci_image_from_tree(tree)
-    stage = tempfile.mkdtemp(prefix="xrpld-composed-")
+    stage = tempfile.mkdtemp(prefix="xrpld-builderd-")
     try:
         shutil.copytree(tree, os.path.join(stage, "rippled"), ignore=shutil.ignore_patterns(".git"))
         shutil.copy2(_CLOUDBUILD / "composed.dockerfile", stage)
-        print(f"[xrpld-compose] submitting composed tree -> {image} (ci image {ci_image})",
+        print(f"[xrpld-builder] submitting composed tree -> {image} (ci image {ci_image})",
               flush=True)
         build_id, status = _submit(
             stage, str(_CLOUDBUILD / "cloudbuild.composed.yaml"),
@@ -168,7 +168,7 @@ def submit_branch(source: BranchEntry, sha: str, project: str, ar: str, tag: str
     stage = tempfile.mkdtemp(prefix="xrpld-branch-")
     try:
         shutil.copy2(_CLOUDBUILD / "xrpld.dockerfile", stage)
-        print(f"[xrpld-compose] submitting {source.label} @ {sha[:12]} -> {image} "
+        print(f"[xrpld-builder] submitting {source.label} @ {sha[:12]} -> {image} "
               f"(ci image {ci_image})", flush=True)
         build_id, status = _submit(
             stage, str(_CLOUDBUILD / "cloudbuild.yaml"),

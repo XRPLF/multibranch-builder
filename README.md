@@ -1,4 +1,4 @@
-# xrpld-compose
+# xrpld-builder
 
 Compose a multi-branch xrpld source tree, build it on Google Cloud Build, and push the
 composed tree to a target branch as a GPG-signed commit. One package, three verbs, so the
@@ -6,10 +6,10 @@ perf network (XRPLF/xrpld-perfnet) and the alphanet network (XRPLF/xrplf-alphane
 depend on it instead of carrying their own copies.
 
 ```
-xrpld-compose compose   clone the base, merge each branch in order, write manifest.json
-xrpld-compose build     compile the composed tree (or one branch) on Cloud Build, write build.json
-xrpld-compose push      GPG-sign the composed tree and force-with-lease push it to the target branch
-xrpld-compose manifest  print the manifest trailer (or a markdown table)
+xrpld-builder compose   clone the base, merge each branch in order, write manifest.json
+xrpld-builder build     compile the composed tree (or one branch) on Cloud Build, write build.json
+xrpld-builder push      GPG-sign the composed tree and force-with-lease push it to the target branch
+xrpld-builder manifest  print the manifest trailer (or a markdown table)
 ```
 
 Each subcommand reads and writes one work directory:
@@ -35,7 +35,7 @@ outcomes recorded per branch in the manifest:
 
 Two mechanisms run before claude sees a conflict:
 
-- `xrpld_compose/registry_merge.py` is registered as the repo-local merge driver
+- `xrpld_builder/registry_merge.py` is registered as the repo-local merge driver
   (`.git/info/attributes`, never committed) for `features.macro`, `ledger_entries.macro`,
   `transactions.macro`, `sfields.macro` and `jss.h`. It unions independent entries and
   renumbers an incoming entry whose numeric id collides. Anything it cannot prove safe stays
@@ -45,7 +45,7 @@ Two mechanisms run before claude sees a conflict:
 What remains goes to the local `claude` CLI: `claude -p <prompt> --permission-mode
 bypassPermissions --allowedTools Read,Edit,Bash,Glob,Grep --add-dir <tree> --max-budget-usd 5`
 under a one-hour subprocess timeout. The prompt lists the conflicted files and appends
-`xrpld_compose/merge.md`, the resolution guide (registry-number collisions, namespace and
+`xrpld_builder/merge.md`, the resolution guide (registry-number collisions, namespace and
 file-move rules, the per-file strategy). After claude returns, files that still contain
 conflict markers or stay unmerged make the outcome `conflict`.
 
@@ -70,7 +70,7 @@ that keep a branch in step with develop; `compose` itself does not act on it.
 ## CLI contract
 
 ```
-xrpld-compose compose  --conf FILE | (--src URL [--features URL...]) [--datagram URL]
+xrpld-builder compose  --conf FILE | (--src URL [--features URL...]) [--datagram URL]
                        --workdir DIR [--dry-run] [--force-supported ON|OFF]
 ```
 
@@ -82,7 +82,7 @@ xrpld-compose compose  --conf FILE | (--src URL [--features URL...]) [--datagram
 - `--force-supported` is recorded in the manifest as the build default.
 
 ```
-xrpld-compose build    (--tree DIR/rippled | --src URL [--datagram URL])
+xrpld-builder build    (--tree DIR/rippled | --src URL [--datagram URL])
                        --project P --ar AR [--tag TAG] [--pool POOL] [--force-supported ON|OFF]
                        [--ci-image IMG] --workdir DIR
 ```
@@ -112,7 +112,7 @@ xrpld-compose build    (--tree DIR/rippled | --src URL [--datagram URL])
   enable from the branch commit, so `--build_version` must name that commit.
 
 ```
-xrpld-compose push     --tree DIR/rippled [--target owner/repo@branch]
+xrpld-builder push     --tree DIR/rippled [--target owner/repo@branch]
                        --manifest DIR/manifest.json --build DIR/build.json
 ```
 
@@ -122,15 +122,15 @@ xrpld-compose push     --tree DIR/rippled [--target owner/repo@branch]
 - Configures signing from the environment, creates one signed commit on top of the composed
   tree (an empty commit when nothing else changed) whose message is
   `compose: <branch> from <base> @ <sha8> (<n> branches)` with the trailer
-  `Xrpld-Compose-Manifest: <compact manifest json>`, verifies the signature with
+  `Xrpld-Builder-Manifest: <compact manifest json>`, verifies the signature with
   `git verify-commit HEAD`, and pushes with `--force-with-lease=refs/heads/<branch>:<sha the
   branch has right now>` over PAT-authenticated HTTPS. Unsigned, or without a PAT, it refuses.
 
 ```
-xrpld-compose manifest DIR [--markdown]
+xrpld-builder manifest DIR [--markdown]
 ```
 
-Prints the `Xrpld-Compose-Manifest:` trailer, or a per-branch outcome table for a job summary.
+Prints the `Xrpld-Builder-Manifest:` trailer, or a per-branch outcome table for a job summary.
 
 ## Environment variables
 
@@ -139,7 +139,7 @@ Read at call time, never at import, never printed.
 | variable | used by | meaning |
 |---|---|---|
 | `GITHUB_BOT_PAT` | push | PAT of the service account; the only credential that can push |
-| `GIT_BOT_NAME` | compose, push | git `user.name`; compose falls back to `xrpld-compose` |
+| `GIT_BOT_NAME` | compose, push | git `user.name`; compose falls back to `xrpld-builder` |
 | `GIT_BOT_EMAIL` | compose, push | git `user.email`; must match a uid on the signing key |
 | `GIT_SIGNING_KEY` | push | the armored GPG private key, or its base64 |
 | `ANTHROPIC_API_KEY` | compose | consumed by the `claude` CLI when it resolves conflicts (unset locally to use your own login) |
@@ -156,7 +156,7 @@ Read at call time, never at import, never printed.
 
 `.github/workflows/compose.yml` is a `workflow_call` workflow. Inputs: `conf-path`,
 `project`, `ar`, `pool`, `force-supported`, `dry-run`, `workload-identity-provider`,
-`service-account`, `bot-name`, `bot-email`, `xrpld-compose-ref`. Secrets: `GITHUB_BOT_PAT`,
+`service-account`, `bot-name`, `bot-email`, `xrpld-builder-ref`. Secrets: `GITHUB_BOT_PAT`,
 `GPG_PRIVATE_KEY`, `ANTHROPIC_API_KEY`. It checks out the caller, installs this package and the
 claude CLI, authenticates to GCP with `google-github-actions/auth`, then runs compose, build and
 push on green unless `dry-run`, and writes the per-branch outcome table to the job summary.
@@ -164,7 +164,7 @@ push on green unless `dry-run`, and writes the per-branch outcome table to the j
 ```yaml
 jobs:
   alphanet:
-    uses: XRPLF/xrpld-compose/.github/workflows/compose.yml@main
+    uses: XRPLF/xrpld-builder/.github/workflows/compose.yml@main
     with:
       conf-path: alphanet.conf
       project: xrplf-alphanet

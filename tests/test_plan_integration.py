@@ -1,5 +1,5 @@
 """Unit tests for the incremental-integration planner."""
-from xrpld_compose.merge import plan_integration
+from xrpld_builder.merge import plan_integration
 
 DEV_OLD = "d" * 40
 DEV_NEW = "e" * 40

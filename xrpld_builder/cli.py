@@ -1,4 +1,4 @@
-"""`xrpld-compose` — compose, build, push, manifest."""
+"""`xrpld-builder` — compose, build, push, manifest."""
 
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ def cmd_compose(args: argparse.Namespace) -> int:
         manifest = compose(base, branches, args.workdir, datagram=datagram, target=target,
                            force_supported=args.force_supported)
     except ComposeError as e:
-        sys.exit(f"[xrpld-compose] {e}")
+        sys.exit(f"[xrpld-builder] {e}")
     print(f"composed {manifest.composed_sha} at {Path(args.workdir) / TREE_DIR}")
     return 0
 
@@ -62,10 +62,10 @@ def cmd_build(args: argparse.Namespace) -> int:
             tree = Path(args.tree)
             manifest_path = tree.parent / MANIFEST_FILE
             if not manifest_path.is_file():
-                sys.exit(f"[xrpld-compose] {manifest_path} not found — run `xrpld-compose compose` first")
+                sys.exit(f"[xrpld-builder] {manifest_path} not found — run `xrpld-builder compose` first")
             manifest = Manifest.load(manifest_path)
             if manifest.failed:
-                sys.exit(f"[xrpld-compose] manifest records unmerged branches: {manifest.failed}")
+                sys.exit(f"[xrpld-builder] manifest records unmerged branches: {manifest.failed}")
             base = BranchEntry.from_slug(manifest.base)
             name = BranchEntry.from_slug(manifest.target).branch if manifest.target else base.branch
             force_supported = args.force_supported or manifest.force_supported
@@ -76,7 +76,7 @@ def cmd_build(args: argparse.Namespace) -> int:
                           build_version=manifest.base_sha, composed_sha=manifest.composed_sha)
         else:
             if not args.src:
-                sys.exit("[xrpld-compose] one of --tree or --src is required")
+                sys.exit("[xrpld-builder] one of --tree or --src is required")
             source = BranchEntry.parse(args.src)
             datagram = BranchEntry.parse(args.datagram, "datagram") if args.datagram else None
             sha = build_mod.resolve_sha(source.url, source.branch)
@@ -88,11 +88,11 @@ def cmd_build(args: argparse.Namespace) -> int:
             record.update(build_server=f"https://github.com/{source.slug}/tree/{source.branch}",
                           build_version=sha)
     except build_mod.BuildError as e:
-        sys.exit(f"[xrpld-compose] {e}")
+        sys.exit(f"[xrpld-builder] {e}")
     record.update(tag=tag, ar=args.ar, project=args.project, pool=pool, force_supported=force_supported)
     build_mod.write_build(workdir, record)
     if record["status"] != SUCCESS:
-        sys.exit(f"[xrpld-compose] build {record['build_id']} finished {record['status']}")
+        sys.exit(f"[xrpld-builder] build {record['build_id']} finished {record['status']}")
     print(record["image"])
     return 0
 
@@ -100,21 +100,21 @@ def cmd_build(args: argparse.Namespace) -> int:
 def cmd_push(args: argparse.Namespace) -> int:
     build_path = Path(args.build)
     if not build_path.is_file():
-        sys.exit(f"[xrpld-compose] {build_path} not found — build first")
+        sys.exit(f"[xrpld-builder] {build_path} not found — build first")
     record = build_mod.load_build(build_path)
     if record.get("status") != SUCCESS:
-        sys.exit(f"[xrpld-compose] build status is {record.get('status')!r}, not SUCCESS — refusing to push")
+        sys.exit(f"[xrpld-builder] build status is {record.get('status')!r}, not SUCCESS — refusing to push")
     manifest = Manifest.load(args.manifest)
     if manifest.failed:
-        sys.exit(f"[xrpld-compose] manifest records unmerged branches: {manifest.failed}")
+        sys.exit(f"[xrpld-builder] manifest records unmerged branches: {manifest.failed}")
     target_text = args.target or manifest.target
     if not target_text:
-        sys.exit("[xrpld-compose] no --target and the manifest names none")
+        sys.exit("[xrpld-builder] no --target and the manifest names none")
     target = BranchEntry.from_slug(target_text)
     tree = str(args.tree)
     head = git_push._run(["git", "rev-parse", "HEAD"], cwd=tree).stdout.strip()
     if head != manifest.composed_sha:
-        sys.exit(f"[xrpld-compose] {tree} HEAD {head[:12]} is not the manifest's composed_sha "
+        sys.exit(f"[xrpld-builder] {tree} HEAD {head[:12]} is not the manifest's composed_sha "
                  f"{manifest.composed_sha[:12]}")
     message = (f"compose: {target.branch} from {manifest.base} @ {manifest.base_sha[:8]} "
                f"({len(manifest.branches)} branches)\n\n{manifest.trailer()}")
@@ -123,7 +123,7 @@ def cmd_push(args: argparse.Namespace) -> int:
         sha = git_push.commit_all(tree, message, include_untracked=False, allow_empty=True)
         git_push.push(tree, target.owner, target.repo, target.branch, force=True)
     except (git_push.SigningNotConfigured, RuntimeError) as e:
-        sys.exit(f"[xrpld-compose] {e}")
+        sys.exit(f"[xrpld-builder] {e}")
     print(f"pushed {sha} -> {target.label}")
     return 0
 
@@ -137,7 +137,7 @@ def cmd_manifest(args: argparse.Namespace) -> int:
 
 
 def _parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(prog="xrpld-compose",
+    ap = argparse.ArgumentParser(prog="xrpld-builder",
                                  description="Compose a multi-branch xrpld tree, build it on Cloud Build, push it signed.")
     sub = ap.add_subparsers(dest="command", required=True)
 
@@ -185,7 +185,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return args.func(args)
     except ConfError as e:
-        sys.exit(f"[xrpld-compose] {e}")
+        sys.exit(f"[xrpld-builder] {e}")
 
 
 if __name__ == "__main__":
