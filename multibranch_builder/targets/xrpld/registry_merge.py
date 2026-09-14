@@ -196,7 +196,7 @@ def _renumber(entry: Entry, num_idx: int, old_raw: str, new_value: int) -> Entry
     new_text, n = pattern.subn(lambda m: m.group(1) + new_raw, entry.text, count=1)
     if n != 1:
         return entry  # could not substitute safely — caller re-validates
-    return Entry(macro=entry.macro, name=entry.name, text=new_text)
+    return Entry(macro=entry.macro, name=entry.name, text=new_text, lead=entry.lead)
 
 
 def merge3(base_text: str, ours_text: str, theirs_text: str, filename: str,

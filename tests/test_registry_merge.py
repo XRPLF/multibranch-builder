@@ -266,3 +266,19 @@ def test_appended_transaction_with_no_header_in_tree_is_left_alone(tmp_path):
     assert merged is not None
     assert merged.count("#if TRANSACTION_INCLUDE") == 1
     assert "TRANSACTION(ttUNKNOWN, 72, Unknown" in merged
+
+
+def test_renumbered_transaction_keeps_its_lead(tmp_path):
+    theirs = TX_LEAD_BASE + """\
+/** Sets a passkey list. */
+#if TRANSACTION_INCLUDE
+#   include <xrpl/tx/transactors/account/SetPasskeyList.h>
+#endif
+TRANSACTION(ttPASSKEY_LIST_SET, 0, PasskeyListSet, ({}), ({
+    {sfPasskeys, SoeRequired},
+}))
+"""
+    merged = merge3(TX_LEAD_BASE, TX_LEAD_BASE, theirs, "transactions.macro", tree=tmp_path)
+    assert merged is not None
+    assert ("/** Sets a passkey list. */\n#if TRANSACTION_INCLUDE\n#   include <xrpl/tx/transactors/account/SetPasskeyList.h>\n#endif\n"
+            "TRANSACTION(ttPASSKEY_LIST_SET, 101, PasskeyListSet") in merged
