@@ -3,7 +3,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from multibranch_builder.targets.xrpld.registry_merge import merge3, parse
+from multibranch_builder.targets.xrpld.registry_merge import merge3, parse, render
 
 DRIVER = Path(__file__).parents[1] / "multibranch_builder" / "targets" / "xrpld" / "registry_merge.py"
 
@@ -173,8 +173,7 @@ def test_unparseable_returns_none():
 def test_parse_roundtrip_preserves_text():
     chunks = parse(LEDGER_BASE)
     assert chunks is not None
-    rebuilt = "".join(c if isinstance(c, str) else c.text for c in chunks)
-    assert rebuilt == LEDGER_BASE
+    assert render(chunks) == LEDGER_BASE
 
 
 def test_driver_cli_resolves_and_writes_ours(tmp_path):
@@ -202,3 +201,68 @@ def test_driver_cli_unhandled_file_exits_nonzero(tmp_path):
         capture_output=True, text=True,
     )
     assert proc.returncode == 1
+
+
+TX_LEAD_BASE = """\
+/** Payment. */
+#if TRANSACTION_INCLUDE
+#   include <xrpl/tx/transactors/payment/Payment.h>
+#endif
+TRANSACTION(ttPAYMENT, 0, Payment, ({.delegable = Delegation::Delegable}), ({
+    {sfDestination, SoeRequired},
+}))
+
+/** Pseudo-transaction. */
+TRANSACTION(ttAMENDMENT, 100, EnableAmendment, ({}), ({
+    {sfLedgerSequence, SoeRequired},
+}))
+"""
+
+
+def test_parse_keeps_the_lead_with_its_entry():
+    chunks = parse(TX_LEAD_BASE)
+    entries = [c for c in chunks if not isinstance(c, str)]
+    assert entries[0].lead == "/** Payment. */\n#if TRANSACTION_INCLUDE\n#   include <xrpl/tx/transactors/payment/Payment.h>\n#endif\n"
+    assert entries[1].lead == "/** Pseudo-transaction. */\n"
+    assert render(chunks) == TX_LEAD_BASE
+
+
+def test_appended_transaction_carries_its_comment_and_include_block(tmp_path):
+    theirs = TX_LEAD_BASE + """\
+/** Sets a passkey list. */
+#if TRANSACTION_INCLUDE
+#   include <xrpl/tx/transactors/passkey/PasskeyListSet.h>
+#endif
+TRANSACTION(ttPASSKEY_LIST_SET, 70, PasskeyListSet, ({}), ({
+    {sfPasskeys, SoeRequired},
+}))
+"""
+    merged = merge3(TX_LEAD_BASE, TX_LEAD_BASE, theirs, "transactions.macro", tree=tmp_path)
+    assert merged is not None
+    assert "#   include <xrpl/tx/transactors/passkey/PasskeyListSet.h>\n#endif\nTRANSACTION(ttPASSKEY_LIST_SET" in merged
+    assert "/** Sets a passkey list. */" in merged
+
+
+def test_appended_transaction_without_include_block_gets_one_from_the_tree(tmp_path):
+    header = tmp_path / "include" / "xrpl" / "tx" / "transactors" / "token" / "TokenIssuanceCreate.h"
+    header.parent.mkdir(parents=True)
+    header.write_text("#pragma once\n")
+    theirs = TX_LEAD_BASE + """\
+TRANSACTION(ttTOKEN_ISSUANCE_CREATE, 71, TokenIssuanceCreate, ({}), ({
+    {sfAmount, SoeRequired},
+}))
+"""
+    merged = merge3(TX_LEAD_BASE, TX_LEAD_BASE, theirs, "transactions.macro", tree=tmp_path)
+    assert merged is not None
+    assert ("#if TRANSACTION_INCLUDE\n#   include <xrpl/tx/transactors/token/TokenIssuanceCreate.h>\n#endif\n"
+            "TRANSACTION(ttTOKEN_ISSUANCE_CREATE") in merged
+    # the existing entries keep exactly one block each
+    assert merged.count("#if TRANSACTION_INCLUDE") == 2
+
+
+def test_appended_transaction_with_no_header_in_tree_is_left_alone(tmp_path):
+    theirs = TX_LEAD_BASE + "TRANSACTION(ttUNKNOWN, 72, Unknown, ({}), ({\n    {sfAmount, SoeRequired},\n}))\n"
+    merged = merge3(TX_LEAD_BASE, TX_LEAD_BASE, theirs, "transactions.macro", tree=tmp_path)
+    assert merged is not None
+    assert merged.count("#if TRANSACTION_INCLUDE") == 1
+    assert "TRANSACTION(ttUNKNOWN, 72, Unknown" in merged

@@ -18,9 +18,11 @@ Stdlib-only: git invokes this file directly as a script with
 """
 from __future__ import annotations
 
+import os
 import re
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 # Filename → (numeric arg index, scope arg index or None). Files absent from
@@ -40,6 +42,11 @@ _HANDLED = (
 )
 
 _ENTRY_START = re.compile(r"^\s*([A-Z][A-Za-z0-9_]*)\s*\(")
+# A lead is the doc comment and `#if TRANSACTION_INCLUDE` block written directly above an
+# entry; it travels with the entry when the entry is appended from the other side.
+_LEAD_LINE = re.compile(r"^\s*(#|/\*|\*|//)")
+_INCLUDE_GUARD = "#if TRANSACTION_INCLUDE"
+_TRANSACTORS = Path("include/xrpl/tx/transactors")
 
 
 @dataclass
@@ -47,6 +54,15 @@ class Entry:
     macro: str
     name: str          # first argument — the registry key
     text: str          # full entry text, including trailing newline(s)
+    lead: str = ""     # comment and include block directly above the entry
+
+
+def _split_lead(opaque: list[str]) -> tuple[list[str], str]:
+    """Split the trailing comment/preprocessor lines off an opaque run."""
+    i = len(opaque)
+    while i > 0 and opaque[i - 1].strip() and _LEAD_LINE.match(opaque[i - 1]):
+        i -= 1
+    return opaque[:i], "".join(opaque[i:])
 
 
 def _strip_comments(line: str) -> str:
@@ -85,13 +101,36 @@ def parse(text: str) -> Optional[list]:
         args = _first_args(entry_text, m.group(1))
         if args is None:
             return None
+        opaque, lead = _split_lead(opaque)
         if opaque:
             chunks.append("".join(opaque))
             opaque = []
-        chunks.append(Entry(macro=m.group(1), name=args[0], text=entry_text))
+        chunks.append(Entry(macro=m.group(1), name=args[0], text=entry_text, lead=lead))
     if opaque:
         chunks.append("".join(opaque))
     return chunks
+
+
+def render(chunks: list) -> str:
+    return "".join(c.lead + c.text if isinstance(c, Entry) else c for c in chunks)
+
+
+def _with_include_block(entry: Entry, tree: Path) -> Entry:
+    """Give a transactions.macro entry the `#if TRANSACTION_INCLUDE` block develop's macro
+    form expects, when it lacks one and its transactor header exists in the tree."""
+    if _INCLUDE_GUARD in entry.lead:
+        return entry
+    args = _first_args(entry.text, entry.macro)
+    if args is None or len(args) < 3:
+        return entry
+    matches = sorted((tree / _TRANSACTORS).rglob(f"{args[2]}.h"))
+    if len(matches) != 1:
+        print(f"registry-merge: no transactor header for {entry.name}; entry appended without "
+              f"an include block", file=sys.stderr)
+        return entry
+    rel = matches[0].relative_to(tree / "include")
+    block = f"{_INCLUDE_GUARD}\n#   include <{rel.as_posix()}>\n#endif\n"
+    return Entry(macro=entry.macro, name=entry.name, text=entry.text, lead=entry.lead + block)
 
 
 def _first_args(entry_text: str, macro: str) -> Optional[list[str]]:
@@ -160,8 +199,11 @@ def _renumber(entry: Entry, num_idx: int, old_raw: str, new_value: int) -> Entry
     return Entry(macro=entry.macro, name=entry.name, text=new_text)
 
 
-def merge3(base_text: str, ours_text: str, theirs_text: str, filename: str) -> Optional[str]:
-    """Structured 3-way merge. Returns merged text, or None if not provably safe."""
+def merge3(base_text: str, ours_text: str, theirs_text: str, filename: str,
+           tree: Optional[Path] = None) -> Optional[str]:
+    """Structured 3-way merge. Returns merged text, or None if not provably safe.
+    `tree` is the repository root, used to find transactor headers for include blocks."""
+    tree = tree or Path(os.getcwd())
     base_c, ours_c, theirs_c = parse(base_text), parse(ours_text), parse(theirs_text)
     if base_c is None or ours_c is None or theirs_c is None:
         return None
@@ -230,6 +272,9 @@ def merge3(base_text: str, ours_text: str, theirs_text: str, filename: str) -> O
             renumbered.append(entry)
         new_entries = renumbered
 
+    if new_entries and filename == "transactions.macro" and _INCLUDE_GUARD in ours_text:
+        new_entries = [_with_include_block(e, tree) for e in new_entries]
+
     if new_entries:
         last_entry_idx = max(
             (i for i, c in enumerate(out_chunks) if isinstance(c, Entry)),
@@ -241,7 +286,7 @@ def merge3(base_text: str, ours_text: str, theirs_text: str, filename: str) -> O
         for offset, entry in enumerate(new_entries):
             out_chunks.insert(insert_at + offset, entry)
 
-    merged = "".join(c.text if isinstance(c, Entry) else c for c in out_chunks)
+    merged = render(out_chunks)
     return merged if _validate(merged, filename) else None
 
 
