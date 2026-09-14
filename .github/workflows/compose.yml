@@ -26,8 +26,18 @@ on:
         required: false
         type: string
         default: ""
+      tag:
+        description: image tag ('' = <safe-branch>-<sha8> plus the kind's suffix); a fixed tag moves to each new build
+        required: false
+        type: string
+        default: ""
       dry-run:
         description: print the plan and stop; no clone, build or push
+        required: false
+        type: boolean
+        default: false
+      ai-resolve:
+        description: let claude resolve merge conflicts (needs ANTHROPIC_API_KEY); false passes --no-ai and a conflict fails the run
         required: false
         type: boolean
         default: false
@@ -61,7 +71,7 @@ on:
       GPG_PRIVATE_KEY:
         required: true
       ANTHROPIC_API_KEY:
-        required: true
+        required: false
 
 jobs:
   compose:
@@ -84,7 +94,7 @@ jobs:
         run: pip install "git+https://github.com/XRPLF/multibranch-builder@${{ inputs.multibranch-builder-ref }}"
 
       - name: Install the claude CLI
-        if: ${{ !inputs.dry-run }}
+        if: ${{ !inputs.dry-run && inputs.ai-resolve }}
         run: npm install -g @anthropic-ai/claude-code
 
       - name: Plan
@@ -100,6 +110,7 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           set -- ; for kv in ${{ inputs.options }}; do set -- "$@" --set "$kv"; done
+          if [ "${{ inputs.ai-resolve }}" != "true" ]; then set -- "$@" --no-ai; fi
           multibranch-builder compose --conf "${{ inputs.conf-path }}" --workdir "$WORKDIR" "$@"
 
       - name: Per-branch outcome
@@ -122,6 +133,7 @@ jobs:
         if: ${{ !inputs.dry-run }}
         run: |
           set -- ; for kv in ${{ inputs.options }}; do set -- "$@" --set "$kv"; done
+          if [ -n "${{ inputs.tag }}" ]; then set -- "$@" --tag "${{ inputs.tag }}"; fi
           multibranch-builder build --workdir "$WORKDIR" \
             --project "${{ inputs.project }}" --ar "${{ inputs.ar }}" --pool "${{ inputs.pool }}" "$@" | tee build.txt
           { echo '### build'; echo "image: \`$(tail -n1 build.txt)\`"; } >> "$GITHUB_STEP_SUMMARY"

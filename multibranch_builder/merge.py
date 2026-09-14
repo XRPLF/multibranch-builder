@@ -122,6 +122,12 @@ def ai_resolve(cwd: str, source_label: str, base_label: str, *, guide_path: Path
     return True
 
 
+def no_resolve(cwd: str, source_label: str, base_label: str) -> bool:
+    """Resolver that leaves every conflict unresolved, so the merge is aborted as `conflict`."""
+    _log(f"{source_label}: {len(conflicted_files(cwd))} conflicted file(s), no resolver (--no-ai)")
+    return False
+
+
 def merge_source_into_current(repo_dir: str, source_ref: str, branch_label: str,
                               base_label: str, resolver: Resolver = ai_resolve) -> str:
     """Merge `source_ref` into the checked-out branch with `--no-commit`; the result stays staged.

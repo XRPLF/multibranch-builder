@@ -10,6 +10,7 @@ from . import git_push
 from .build import BUILD_FILE, BuildError, image_tag, load_build, resolve_sha, write_build
 from .compose import MANIFEST_FILE, ComposeError, Manifest, compose
 from .conf import BranchEntry, Config, ConfError, parse_config
+from .merge import no_resolve
 from .targets import KINDS, for_base, for_config, for_name
 from .targets.base import BuildRequest, Kind
 
@@ -64,7 +65,8 @@ def cmd_compose(args: argparse.Namespace) -> int:
         print("options " + (" ".join(f"{k}={v}" for k, v in sorted(options.items())) or "(none)"))
         return 0
     try:
-        manifest = compose(config, args.workdir, kind=kind, options=options)
+        manifest = compose(config, args.workdir, kind=kind, options=options,
+                           resolver=no_resolve if args.no_ai else None)
     except ComposeError as e:
         sys.exit(f"[multibranch-builder] {e}")
     print(f"composed {manifest.composed_sha} at {Path(args.workdir) / kind.tree_dir}")
@@ -189,6 +191,8 @@ def _parser() -> argparse.ArgumentParser:
     c.add_argument("--workdir", required=True, help="directory receiving <tree_dir>/ and manifest.json")
     c.add_argument("--set", action="append", default=[], metavar="KEY=VALUE", help=set_help)
     c.add_argument("--dry-run", action="store_true", help="print the plan and exit without cloning")
+    c.add_argument("--no-ai", action="store_true",
+                   help="never call claude: a conflict git and the merge drivers cannot settle fails the compose")
     c.set_defaults(func=cmd_compose)
 
     b = sub.add_parser("build", help="build the composed tree in --workdir, or a single branch")

@@ -37,6 +37,18 @@ def test_compose_dry_run_prints_plan_without_cloning(tmp_path, capsys):
     assert not (tmp_path / "w").exists()
 
 
+def test_compose_no_ai_passes_the_declining_resolver(tmp_path):
+    conf = tmp_path / "c"
+    conf.write_text(CONF)
+    with patch("multibranch_builder.cli.compose") as mock_compose:
+        mock_compose.return_value = Manifest(base="XRPLF/rippled@develop", base_sha="a" * 40,
+                                             composed_sha="a" * 40)
+        cli.main(["compose", "--conf", str(conf), "--workdir", str(tmp_path / "w"), "--no-ai"])
+        assert mock_compose.call_args.kwargs["resolver"] is cli.no_resolve
+        cli.main(["compose", "--conf", str(conf), "--workdir", str(tmp_path / "w")])
+        assert mock_compose.call_args.kwargs["resolver"] is None
+
+
 def test_compose_rejects_option_the_kind_does_not_accept(tmp_path):
     conf = tmp_path / "c"
     conf.write_text(CONF)

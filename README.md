@@ -107,6 +107,8 @@ multibranch-builder compose  (--conf FILE | --src URL [--features URL...]) --wor
 - `--set` passes options to the kind, validated after the conf is parsed; `kinds` lists them.
   For xrpld: `force_supported=ON|OFF` (default OFF) is recorded in the manifest as the build
   default, and `datagram=<ref>` is merged before the conf entries.
+- `--no-ai` never calls `claude`: a conflict that `git rerere` and the kind's merge driver do
+  not settle is aborted and the compose fails with that branch marked `conflict`.
 - `--dry-run` prints the plan (kind, base, ordered branches, target, settings, options) and
   exits 0 without cloning.
 - URLs are github `tree`, `commit` or repo URLs; `owner/repo@branch` is also accepted. A bare
