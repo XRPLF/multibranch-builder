@@ -58,10 +58,32 @@ class Entry:
 
 
 def _split_lead(opaque: list[str]) -> tuple[list[str], str]:
-    """Split the trailing comment/preprocessor lines off an opaque run."""
+    """Split the trailing comment/preprocessor lines off an opaque run. A block comment is
+    taken whole, blank lines inside it included; one that never opens is not taken."""
     i = len(opaque)
-    while i > 0 and opaque[i - 1].strip() and _LEAD_LINE.match(opaque[i - 1]):
+    in_comment = False
+    while i > 0:
+        line = opaque[i - 1]
+        stripped = line.strip()
+        if in_comment:
+            i -= 1
+            if "/*" in line:
+                in_comment = False
+            continue
+        if not stripped:
+            break
+        if stripped.endswith("*/") and "/*" not in stripped:
+            in_comment = True
+            i -= 1
+            continue
+        if not _LEAD_LINE.match(line):
+            break
         i -= 1
+    if in_comment:
+        # Walked off the top without an opening: keep only preprocessor and // lines.
+        i = len(opaque)
+        while i > 0 and opaque[i - 1].strip() and re.match(r"^\s*(#|//)", opaque[i - 1]):
+            i -= 1
     return opaque[:i], "".join(opaque[i:])
 
 

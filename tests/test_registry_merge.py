@@ -282,3 +282,31 @@ TRANSACTION(ttPASSKEY_LIST_SET, 0, PasskeyListSet, ({}), ({
     assert merged is not None
     assert ("/** Sets a passkey list. */\n#if TRANSACTION_INCLUDE\n#   include <xrpl/tx/transactors/account/SetPasskeyList.h>\n#endif\n"
             "TRANSACTION(ttPASSKEY_LIST_SET, 101, PasskeyListSet") in merged
+
+
+def test_lead_takes_a_block_comment_with_a_blank_line_inside(tmp_path):
+    theirs = TX_LEAD_BASE + """\
+/** A ledger object representing a passkey list.
+
+    \\sa keylet::passkeyList
+ */
+TRANSACTION(ttPASSKEY_LIST_SET, 70, PasskeyListSet, ({}), ({
+    {sfPasskeys, SoeRequired},
+}))
+"""
+    chunks = parse(theirs)
+    entry = [c for c in chunks if not isinstance(c, str)][-1]
+    assert entry.lead.startswith("/** A ledger object") and entry.lead.endswith(" */\n")
+    assert render(chunks) == theirs
+    merged = merge3(TX_LEAD_BASE, TX_LEAD_BASE, theirs, "ledger_entries.macro", tree=tmp_path)
+    assert merged is not None
+    assert "/** A ledger object representing a passkey list.\n\n    \\sa keylet::passkeyList\n */\nTRANSACTION(ttPASSKEY_LIST_SET" in merged
+    assert merged.count("*/") == theirs.count("*/")
+
+
+def test_lead_never_takes_a_closing_line_without_its_opening():
+    text = "text without an opening\n */\nXRPL_FEATURE(Foo, Supported::Yes, VoteBehavior::DefaultNo)\n"
+    chunks = parse(text)
+    entry = [c for c in chunks if not isinstance(c, str)][0]
+    assert entry.lead == ""
+    assert render(chunks) == text
