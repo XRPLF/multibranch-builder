@@ -97,6 +97,23 @@ def _fetch(src: str, entry) -> str:
     return _run(["git", "rev-parse", "FETCH_HEAD"], cwd=src).stdout.strip()
 
 
+RERERE_DIR = "rr-cache"
+
+
+def _save_rerere(tree: str, workdir: Path) -> None:
+    """Keep the clone's recorded conflict resolutions in the workdir so the next compose
+    replays them instead of resolving the same hunks again."""
+    cache = Path(tree) / ".git" / RERERE_DIR
+    if cache.is_dir():
+        shutil.copytree(cache, workdir / RERERE_DIR, dirs_exist_ok=True)
+
+
+def _restore_rerere(workdir: Path, tree: str) -> None:
+    saved = workdir / RERERE_DIR
+    if saved.is_dir():
+        shutil.copytree(saved, Path(tree) / ".git" / RERERE_DIR, dirs_exist_ok=True)
+
+
 def compose(config: Config, workdir: str | Path, *, kind: Kind, options: dict[str, str],
             resolver: Resolver | None = None) -> Manifest:
     """Clone the base into `workdir/<kind.tree_dir>`, merge `kind.plan(...)` in order, run
@@ -112,11 +129,13 @@ def compose(config: Config, workdir: str | Path, *, kind: Kind, options: dict[st
     workdir.mkdir(parents=True, exist_ok=True)
     src = str(workdir / kind.tree_dir)
     if os.path.isdir(src):
+        _save_rerere(src, workdir)
         shutil.rmtree(src)
     _log(f"clone {base.label}")
     clone = _run(["git", "clone", base.url, src], cwd=str(workdir), check=False)
     if clone.returncode != 0:
         raise ComposeError(f"clone of {base.url} failed:\n{clone.stderr.strip()}")
+    _restore_rerere(workdir, src)
     checkout = _run(["git", "checkout", "--quiet", base.branch], cwd=src, check=False)
     if checkout.returncode != 0:
         raise ComposeError(f"checkout of {base.branch} failed:\n{checkout.stderr.strip()}")
@@ -139,6 +158,7 @@ def compose(config: Config, workdir: str | Path, *, kind: Kind, options: dict[st
                 raise ComposeError(f"commit of {entry.label} merge failed:\n{commit.stderr.strip()}")
         _log(f"  {entry.label}: {outcome}")
         manifest.branches.append(BranchOutcome(entry.slug, entry.branch, sha, outcome, entry.rebase))
+    _save_rerere(src, workdir)
 
     if manifest.failed:
         manifest.composed_sha = _run(["git", "rev-parse", "HEAD"], cwd=src).stdout.strip()

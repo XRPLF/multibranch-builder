@@ -177,3 +177,21 @@ def test_compose_prepare_failure_writes_manifest_with_empty_composed_sha(upstrea
     assert manifest.composed_sha == ""
     assert manifest.prepared == {"error": "rpc down"}
     assert manifest.failed == []
+
+
+def test_rerere_resolutions_survive_a_recompose(upstream, tmp_path):
+    """The first compose resolves a conflict through the resolver; the second replays it from
+    the rerere cache kept in the workdir and never calls the resolver."""
+    branches = [BranchEntry("XRPLF", "rippled", "feat/conflict")]
+    work = tmp_path / "work"
+    first = compose(_config(*branches), work, kind=XRPLD, options={}, resolver=resolve_by_taking_theirs)
+    assert [b.outcome for b in first.branches] == ["ai-resolved"]
+    assert (work / compose_mod.RERERE_DIR).is_dir()
+
+    def never(cwd, branch_label, base_label):
+        raise AssertionError("resolver called although rerere holds the resolution")
+
+    second = compose(_config(*branches), work, kind=XRPLD, options={}, resolver=never)
+    assert [b.outcome for b in second.branches] == ["ai-resolved"]
+    assert (work / "rippled" / "a.txt").read_text() == "theirs\n"
+    assert git(work / "rippled", "status", "--porcelain") == ""
