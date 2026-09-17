@@ -215,6 +215,21 @@ jobs:
     secrets: inherit
 ```
 
+## Install
+
+`multibranch-builder` is a console script: it exists only where the package is installed, so a
+venv install leaves it at `.venv/bin/multibranch-builder` and a bare `multibranch-builder` in a
+shell that has not activated that venv fails with `command not found`. Install, then link the
+script into a directory already on PATH:
+
+```
+python3 -m venv .venv && .venv/bin/pip install -e .
+ln -sf "$PWD/.venv/bin/multibranch-builder" <a-directory-on-your-PATH>/multibranch-builder
+```
+
+The script's shebang names the venv's own interpreter, so the link runs from any directory and
+the venv never has to be activated. An editable install means the link follows the working tree.
+
 ## Development
 
 ```
