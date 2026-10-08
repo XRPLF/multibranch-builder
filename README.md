@@ -107,7 +107,9 @@ multibranch-builder compose  (--conf FILE | --src URL [--features URL...]) --wor
 - `--set` passes options to the kind, validated after the conf is parsed; `kinds` lists them.
   For xrpld: `force_supported=ON|OFF` (default OFF) is recorded in the manifest as the build
   default, `datagram=<ref>` is merged before the conf entries, and `version=<semver>` is the
-  version the binary reports (cmake's `FORCE_XRPLD_VERSION`). Without `version`, a composed
+  version the binary reports: cmake's `FORCE_XRPLD_VERSION` on a tree that reads it, otherwise the
+  `versionString` literal in `src/libxrpl/protocol/BuildInfo.cpp` rewritten in the uploaded copy (a
+  release-tag tree); a tree with neither fails the build. Without `version`, a composed
   build reports the version cmake derives from the composed commit, which the build passes in
   place of the `.git` it does not upload.
 - `--dry-run` prints the plan (kind, base, ordered branches, target, settings, options) and

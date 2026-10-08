@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -20,6 +21,9 @@ CI_IMAGE_REPO = "ghcr.io/xrplf/xrpld/nix-ubuntu"
 DEFAULT_CI_IMAGE = f"{CI_IMAGE_REPO}:sha-2e25435"
 STRATEGY_MATRIX = ".github/scripts/strategy-matrix/linux.json"
 _CLOUDBUILD = Path(__file__).with_name("cloudbuild")
+_VERSION_CMAKE = Path("cmake/XrplVersion.cmake")
+_BUILD_INFO = Path("src/libxrpl/protocol/BuildInfo.cpp")
+_VERSION_LITERAL = re.compile(r'(versionString\s*=\s*")[^"]*(")')
 
 
 def _run(cmd: list[str], cwd: str | None = None, check: bool = True) -> subprocess.CompletedProcess:
@@ -70,6 +74,20 @@ def ci_image_from_tree(tree: str | Path) -> str:
     return image
 
 
+def stamp_version(root: Path, version: str) -> None:
+    """Make a tree whose cmake ignores FORCE_XRPLD_VERSION report `version` by rewriting its literal."""
+    cmake = root / _VERSION_CMAKE
+    if not version or (cmake.is_file() and "FORCE_XRPLD_VERSION" in cmake.read_text()):
+        return
+    info = root / _BUILD_INFO
+    text = info.read_text() if info.is_file() else ""
+    stamped, count = _VERSION_LITERAL.subn(lambda m: f"{m.group(1)}{version}{m.group(2)}", text)
+    if count != 1:
+        raise BuildError(f"version {version!r}: the tree reads no FORCE_XRPLD_VERSION and {_BUILD_INFO} "
+                         f"has {count} versionString literals, expected 1")
+    info.write_text(stamped)
+
+
 def submit_tree(tree: str | Path, project: str, ar: str, tag: str, *, sha: str, branch: str,
                 pool: str | None = None, force_supported: str = "OFF", version: str = "",
                 ci_image: str | None = None, region: str = REGION) -> dict:
@@ -82,6 +100,7 @@ def submit_tree(tree: str | Path, project: str, ar: str, tag: str, *, sha: str, 
     stage = tempfile.mkdtemp(prefix="multibranch-builderd-")
     try:
         shutil.copytree(tree, os.path.join(stage, "rippled"), ignore=shutil.ignore_patterns(".git"))
+        stamp_version(Path(stage) / "rippled", version)
         shutil.copy2(_CLOUDBUILD / "composed.dockerfile", stage)
         print(f"[multibranch-builder] submitting composed tree -> {image} (ci image {ci_image})",
               flush=True)

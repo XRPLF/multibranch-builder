@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shlex
 import subprocess
 import sys
@@ -13,6 +14,10 @@ from ..base import BuildRequest, check_keys
 from . import build as build_mod
 
 _HERE = Path(__file__).parent
+# The form beast::SemanticVersion::parse and cmake's FORCE_XRPLD_VERSION check accept.
+_SEMVER = re.compile(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
+                     r"(-[A-Za-z1-9-][A-Za-z0-9-]*(\.[A-Za-z1-9-][A-Za-z0-9-]*)*)?"
+                     r"(\+[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*)?")
 _DRIVER = _HERE / "registry_merge.py"
 _REGISTRY_ATTRIBUTES = (
     "include/xrpl/protocol/detail/features.macro merge=xrplregistry",
@@ -36,8 +41,9 @@ class XrpldKind:
         "force_supported": "ON|OFF: compile every amendment as Supported::Yes (default OFF)",
         "datagram": "owner/repo[@branch] or github URL merged before the conf branches; "
                     "a bare repo means branch `datagram`",
-        "version": "semantic version the binary reports, passed to cmake as FORCE_XRPLD_VERSION "
-                   "(default: the tree's own, from its commit)",
+        "version": "semantic version the binary reports: cmake's FORCE_XRPLD_VERSION where the tree "
+                   "reads it, else its BuildInfo.cpp versionString in the uploaded copy "
+                   "(default: the tree's own)",
     }
     settings: dict[str, str] = {}
 
@@ -49,6 +55,8 @@ class XrpldKind:
         if options.get("datagram"):
             out["datagram"] = BranchEntry.parse(options["datagram"], "datagram").label
         if options.get("version"):
+            if not _SEMVER.fullmatch(options["version"]):
+                raise ConfError(f"version must be a semantic version xrpld accepts, got {options['version']!r}")
             out["version"] = options["version"]
         return out
 

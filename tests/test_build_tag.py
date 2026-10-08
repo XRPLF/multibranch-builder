@@ -1,6 +1,7 @@
 """Tag derivation, Cloud Build argv, and --ar/--set propagation into the xrpld submission."""
 
 import json
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -54,6 +55,8 @@ def test_submit_tree_propagates_ar_into_substitutions_and_image(mock_submit, tmp
     tree = tmp_path / "rippled"
     (tree / ".github/scripts/strategy-matrix").mkdir(parents=True)
     (tree / ".github/scripts/strategy-matrix/linux.json").write_text(json.dumps({"image_tag": "sha-abc1234"}))
+    (tree / "cmake").mkdir()
+    (tree / "cmake/XrplVersion.cmake").write_text("if(DEFINED ENV{FORCE_XRPLD_VERSION})\n")
     ar = "us-central1-docker.pkg.dev/xrplf-alphanet/xrpld"
     record = xbuild.submit_tree(tree, "xrplf-alphanet", ar, "alphanet-01234567", sha="c" * 40,
                                 branch="alphanet", pool="xrpld-pool", force_supported="ON",
@@ -204,3 +207,53 @@ def test_cli_build_src_tag_and_ar(mock_sha, mock_submit, tmp_path, capsys):
     assert record["build_version"] == SHA
     assert record["build_server"] == "https://github.com/XRPLF/rippled/tree/dangell7/x"
     assert record["options"] == {"force_supported": "OFF", "datagram": "XRPLF/rippled@dangell7/datagram"}
+
+
+def _tree_with_build_info(root, cmake_text=None):
+    info = root / "src/libxrpl/protocol/BuildInfo.cpp"
+    info.parent.mkdir(parents=True)
+    info.write_text('// clang-format off\nchar const* const versionString = "3.4.1"\n    ;\n')
+    if cmake_text is not None:
+        (root / "cmake").mkdir()
+        (root / "cmake/XrplVersion.cmake").write_text(cmake_text)
+    return info
+
+
+def test_stamp_version_rewrites_the_literal_on_a_release_tree(tmp_path):
+    info = _tree_with_build_info(tmp_path)
+    xbuild.stamp_version(tmp_path, "3.4.1+d7708bfb")
+    assert 'versionString = "3.4.1+d7708bfb"' in info.read_text()
+
+
+def test_stamp_version_leaves_a_tree_whose_cmake_reads_force_version(tmp_path):
+    info = _tree_with_build_info(tmp_path, 'if(DEFINED ENV{FORCE_XRPLD_VERSION})\n')
+    xbuild.stamp_version(tmp_path, "3.4.1+d7708bfb")
+    assert 'versionString = "3.4.1"' in info.read_text()
+
+
+def test_stamp_version_is_a_noop_without_a_version(tmp_path):
+    info = _tree_with_build_info(tmp_path)
+    xbuild.stamp_version(tmp_path, "")
+    assert 'versionString = "3.4.1"' in info.read_text()
+
+
+def test_stamp_version_refuses_a_tree_with_no_literal(tmp_path):
+    with pytest.raises(BuildError, match="versionString"):
+        xbuild.stamp_version(tmp_path, "3.4.1+d7708bfb")
+
+
+@patch(f"{XBUILD}.submit", return_value=("build-3", "SUCCESS"))
+def test_submit_tree_stamps_the_upload_not_the_tree(mock_submit, tmp_path):
+    tree = tmp_path / "rippled"
+    info = _tree_with_build_info(tree)
+    seen = {}
+
+    def capture(stage, *args):
+        seen["text"] = (Path(stage) / "rippled/src/libxrpl/protocol/BuildInfo.cpp").read_text()
+        return ("build-3", "SUCCESS")
+
+    mock_submit.side_effect = capture
+    xbuild.submit_tree(tree, "p", "ar", "t", sha="c" * 40, branch="b", version="3.4.1+abcdef12",
+                       ci_image="img")
+    assert 'versionString = "3.4.1+abcdef12"' in seen["text"]
+    assert 'versionString = "3.4.1"' in info.read_text()
