@@ -38,7 +38,7 @@ is a package under
 
 | kind | tree_dir | default branch | options | settings | prepare | build |
 |---|---|---|---|---|---|---|
-| `xrpld` | `rippled` | `develop` | `force_supported` ON\|OFF, `datagram` | none | none | Cloud Build with the dockerfiles under `targets/xrpld/cloudbuild/` |
+| `xrpld` | `rippled` | `develop` | `force_supported` ON\|OFF, `datagram`, `version` | none | none | Cloud Build with the dockerfiles under `targets/xrpld/cloudbuild/` |
 | `xrpl_js` | `xrpl.js` | `main` | none | `definitions` (required) | writes the node's `server_definitions` over `packages/ripple-binary-codec/src/enums/definitions.json` and regenerates `package-lock.json` | checks the tree is clean and its definitions load, then `npm ci`, `npm run build`, `npm test` into `npm-build.log` |
 
 The xrpl_js kind takes `definitions <json-rpc url>` from the conf and calls `server_definitions`
@@ -106,7 +106,10 @@ multibranch-builder compose  (--conf FILE | --src URL [--features URL...]) --wor
 
 - `--set` passes options to the kind, validated after the conf is parsed; `kinds` lists them.
   For xrpld: `force_supported=ON|OFF` (default OFF) is recorded in the manifest as the build
-  default, and `datagram=<ref>` is merged before the conf entries.
+  default, `datagram=<ref>` is merged before the conf entries, and `version=<semver>` is the
+  version the binary reports (cmake's `FORCE_XRPLD_VERSION`). Without `version`, a composed
+  build reports the version cmake derives from the composed commit, which the build passes in
+  place of the `.git` it does not upload.
 - `--dry-run` prints the plan (kind, base, ordered branches, target, settings, options) and
   exits 0 without cloning.
 - URLs are github `tree`, `commit` or repo URLs; `owner/repo@branch` is also accepted. A bare

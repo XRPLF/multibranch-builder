@@ -70,10 +70,13 @@ def ci_image_from_tree(tree: str | Path) -> str:
     return image
 
 
-def submit_tree(tree: str | Path, project: str, ar: str, tag: str, *, pool: str | None = None,
-                force_supported: str = "OFF", ci_image: str | None = None,
-                region: str = REGION) -> dict:
-    """Upload `tree` (without .git) as `rippled/` and compile it with composed.dockerfile."""
+def submit_tree(tree: str | Path, project: str, ar: str, tag: str, *, sha: str, branch: str,
+                pool: str | None = None, force_supported: str = "OFF", version: str = "",
+                ci_image: str | None = None, region: str = REGION) -> dict:
+    """Upload `tree` (without .git) as `rippled/` and compile it with composed.dockerfile.
+
+    `sha` and `branch` stand in for the stripped .git when cmake derives the version.
+    """
     image = f"{ar}/xrpld:{tag}"
     ci_image = ci_image or ci_image_from_tree(tree)
     stage = tempfile.mkdtemp(prefix="multibranch-builderd-")
@@ -84,7 +87,8 @@ def submit_tree(tree: str | Path, project: str, ar: str, tag: str, *, pool: str 
               flush=True)
         build_id, status = submit(
             stage, str(_CLOUDBUILD / "cloudbuild.composed.yaml"),
-            {"_AR": ar, "_TAG": tag, "_FORCE_SUPPORTED": force_supported, "_CI_IMAGE": ci_image},
+            {"_AR": ar, "_TAG": tag, "_FORCE_SUPPORTED": force_supported, "_CI_IMAGE": ci_image,
+             "_GIT_SHA": sha, "_GIT_BRANCH": branch, "_XRPLD_VERSION": version},
             project, pool, region)
     finally:
         shutil.rmtree(stage, ignore_errors=True)
@@ -121,8 +125,11 @@ def build(req: BuildRequest, *, datagram: BranchEntry | None = None) -> dict:
         raise BuildError("xrpld builds need --project and --ar")
     force_supported = req.options.get("force_supported", "OFF")
     if req.tree is not None:
-        return submit_tree(req.tree, req.project, req.ar, req.tag, pool=req.pool,
-                           force_supported=force_supported, ci_image=req.ci_image)
+        manifest = req.manifest
+        branch = BranchEntry.from_slug(manifest.target or manifest.base).branch if manifest else ""
+        return submit_tree(req.tree, req.project, req.ar, req.tag, sha=req.sha, branch=branch,
+                           pool=req.pool, force_supported=force_supported,
+                           version=req.options.get("version", ""), ci_image=req.ci_image)
     if req.source is None:
         raise BuildError("build needs a composed tree or a source branch")
     return submit_branch(req.source, req.sha, req.project, req.ar, req.tag, datagram=datagram,

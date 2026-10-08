@@ -6,6 +6,11 @@ substitutions:
   _AR: "us-central1-docker.pkg.dev/xrplf-perf-network/xrpld"
   _TAG: "dev"
   _FORCE_SUPPORTED: "OFF"
+  # The composed commit and branch, for cmake's version in a tree uploaded without .git.
+  _GIT_SHA: ""
+  _GIT_BRANCH: ""
+  # Empty: cmake derives the version from _GIT_SHA.
+  _XRPLD_VERSION: ""
   # Resolved per-build from the tree's strategy-matrix; the default only applies
   # when that lookup fails. A stale pin fails the build on missing toolchains.
   _CI_IMAGE: "ghcr.io/xrplf/xrpld/nix-ubuntu:sha-2e25435"
@@ -20,6 +25,8 @@ steps:
     name: gcr.io/cloud-builders/docker
     args: ["build", "-t", "${_AR}/xrpld:${_TAG}", "-f", "composed.dockerfile",
            "--build-arg", "FORCE_SUPPORTED=${_FORCE_SUPPORTED}",
+           "--build-arg", "GIT_SHA=${_GIT_SHA}", "--build-arg", "GIT_BRANCH=${_GIT_BRANCH}",
+           "--build-arg", "XRPLD_VERSION=${_XRPLD_VERSION}",
            "--build-arg", "CI_IMAGE=${_CI_IMAGE}", "."]
 
 images:

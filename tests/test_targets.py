@@ -37,6 +37,8 @@ def test_xrpld_options_default_and_normalise():
                                   "datagram": "https://github.com/XRPLF/rippled/tree/dangell7/datagram"})
     assert out == {"force_supported": "ON", "datagram": "XRPLF/rippled@dangell7/datagram"}
     assert XRPLD.validate_options({"datagram": "XRPLF/rippled"})["datagram"] == "XRPLF/rippled@datagram"
+    assert XRPLD.validate_options({"version": "3.4.1+6c4808fd"}) == {"force_supported": "OFF",
+                                                                   "version": "3.4.1+6c4808fd"}
 
 
 def test_xrpld_options_reject_unknown_key_and_bad_value():

@@ -36,6 +36,8 @@ class XrpldKind:
         "force_supported": "ON|OFF: compile every amendment as Supported::Yes (default OFF)",
         "datagram": "owner/repo[@branch] or github URL merged before the conf branches; "
                     "a bare repo means branch `datagram`",
+        "version": "semantic version the binary reports, passed to cmake as FORCE_XRPLD_VERSION "
+                   "(default: the tree's own, from its commit)",
     }
     settings: dict[str, str] = {}
 
@@ -46,6 +48,8 @@ class XrpldKind:
             raise ConfError(f"force_supported must be ON or OFF, got {out['force_supported']!r}")
         if options.get("datagram"):
             out["datagram"] = BranchEntry.parse(options["datagram"], "datagram").label
+        if options.get("version"):
+            out["version"] = options["version"]
         return out
 
     def validate_settings(self, settings: dict[str, str]) -> None:

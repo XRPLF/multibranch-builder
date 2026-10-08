@@ -6,9 +6,17 @@ ARG CI_IMAGE=ghcr.io/xrplf/xrpld/nix-ubuntu:sha-2e25435
 # compiling, the same edit the all-amendments CI workflow makes. Required for a network whose
 # chain has amendments enabled that the tree does not mark supported, else nodes amendment-block.
 ARG FORCE_SUPPORTED=OFF
+# The upload has no .git: the composed commit and branch take its place for cmake's version, and a
+# non-empty XRPLD_VERSION overrides that version outright.
+ARG GIT_SHA=""
+ARG GIT_BRANCH=""
+ARG XRPLD_VERSION=""
 
 FROM ${CI_IMAGE} AS build
 ARG FORCE_SUPPORTED
+ARG GIT_SHA
+ARG GIT_BRANCH
+ARG XRPLD_VERSION
 USER root
 WORKDIR /work
 COPY rippled /work/rippled
@@ -32,6 +40,7 @@ RUN cd .build && \
       ! grep -q 'Supported::No,' "$MACRO" && \
       echo "FORCE_SUPPORTED=ON: every amendment in features.macro is Supported::Yes"; \
     fi && \
+    GITHUB_HEAD_SHA="$GIT_SHA" GITHUB_BRANCH_NAME="$GIT_BRANCH" FORCE_XRPLD_VERSION="$XRPLD_VERSION" \
     cmake -DCMAKE_TOOLCHAIN_FILE:FILEPATH=build/generators/conan_toolchain.cmake \
           -DCMAKE_BUILD_TYPE=Release -Dxrpld=ON -Dtests=OFF -Dvalidator_keys=ON \
           -DCMAKE_CXX_FLAGS=-DBOOST_ASIO_HAS_STD_INVOKE_RESULT \

@@ -55,13 +55,15 @@ def test_submit_tree_propagates_ar_into_substitutions_and_image(mock_submit, tmp
     (tree / ".github/scripts/strategy-matrix").mkdir(parents=True)
     (tree / ".github/scripts/strategy-matrix/linux.json").write_text(json.dumps({"image_tag": "sha-abc1234"}))
     ar = "us-central1-docker.pkg.dev/xrplf-alphanet/xrpld"
-    record = xbuild.submit_tree(tree, "xrplf-alphanet", ar, "alphanet-01234567", pool="xrpld-pool",
-                                force_supported="ON")
+    record = xbuild.submit_tree(tree, "xrplf-alphanet", ar, "alphanet-01234567", sha="c" * 40,
+                                branch="alphanet", pool="xrpld-pool", force_supported="ON",
+                                version="3.4.1+01234567")
     assert record["image"] == f"{ar}/xrpld:alphanet-01234567"
     assert record["build_id"] == "build-1"
     stage, config, subs, project, pool, region = mock_submit.call_args.args
     assert subs == {"_AR": ar, "_TAG": "alphanet-01234567", "_FORCE_SUPPORTED": "ON",
-                    "_CI_IMAGE": "ghcr.io/xrplf/xrpld/nix-ubuntu:sha-abc1234"}
+                    "_CI_IMAGE": "ghcr.io/xrplf/xrpld/nix-ubuntu:sha-abc1234",
+                    "_GIT_SHA": "c" * 40, "_GIT_BRANCH": "alphanet", "_XRPLD_VERSION": "3.4.1+01234567"}
     assert config.endswith("cloudbuild.composed.yaml")
     assert (project, pool, region) == ("xrplf-alphanet", "xrpld-pool", "us-central1")
 
@@ -128,7 +130,8 @@ def test_cli_build_tree_honors_ar_and_prints_image_last(mock_submit, tmp_path, c
     assert rc == 0
     args, kwargs = mock_submit.call_args
     assert args[1:] == ("xrplf-alphanet", ar, "alphanet-01234567-dg")
-    assert kwargs == {"pool": "xrpld-pool", "force_supported": "ON", "ci_image": None}
+    assert kwargs == {"sha": SHA, "branch": "alphanet", "pool": "xrpld-pool", "force_supported": "ON",
+                      "version": "", "ci_image": None}
     assert capsys.readouterr().out.strip().splitlines()[-1] == f"{ar}/xrpld:alphanet-01234567-dg"
     record = json.loads((workdir / "build.json").read_text())
     assert record["ar"] == ar
