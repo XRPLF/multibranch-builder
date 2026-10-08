@@ -66,12 +66,13 @@ def test_compose_src_takes_the_kinds_default_branch(capsys):
     assert lines[2] == "merge  1 XRPLF/rippled@f"
 
 
-def _files(tmp_path, status="SUCCESS", outcome="merged", target="Transia-RnD/rippled@alphanet"):
+def _files(tmp_path, status="SUCCESS", outcome="merged", target="Transia-RnD/rippled@alphanet",
+           built="c" * 40):
     manifest = Manifest(base="XRPLF/rippled@develop", base_sha="b" * 40,
                         branches=[BranchOutcome("XRPLF/rippled", "x", "d" * 40, outcome)],
                         composed_sha="c" * 40, target=target)
     manifest.write(tmp_path)
-    (tmp_path / "build.json").write_text(json.dumps({"status": status, "image": "img"}))
+    (tmp_path / "build.json").write_text(json.dumps({"status": status, "image": "img", "composed_sha": built}))
     return manifest
 
 
@@ -121,7 +122,8 @@ def test_push_signs_commits_trailer_and_force_pushes_with_lease(mock_gp, tmp_pat
     assert mock_gp.commit_all.call_args.kwargs == {"include_untracked": False, "allow_empty": True}
     assert message.startswith("compose: alphanet from XRPLF/rippled@develop @ bbbbbbbb (1 branches)\n\n")
     assert message.endswith(manifest.trailer())
-    mock_gp.push.assert_called_once_with(str(tmp_path / "rippled"), "Transia-RnD", "rippled", "alphanet", force=True)
+    mock_gp.push.assert_called_once_with(str(tmp_path / "rippled"), "Transia-RnD", "rippled", "alphanet", force=True,
+                                         operator=False)
     assert capsys.readouterr().out.strip() == f"pushed {'e' * 40} -> Transia-RnD/rippled@alphanet"
 
 
@@ -163,3 +165,22 @@ def test_kinds_lists_xrpld(capsys):
     assert "option   force_supported" in out
     with pytest.raises(SystemExit, match="unknown kind"):
         cli.main(["kinds", "--kind", "nope"])
+
+
+def test_push_refuses_build_of_another_tree(tmp_path):
+    _files(tmp_path, built="a" * 40)
+    with pytest.raises(SystemExit, match="build again"):
+        cli.main(_push_args(tmp_path))
+
+
+@patch("multibranch_builder.cli.git_push")
+def test_push_operator_signs_and_pushes_as_the_operator(mock_gp, tmp_path):
+    _files(tmp_path)
+    mock_gp._run.return_value.stdout = "c" * 40 + "\n"
+    mock_gp.commit_all.return_value = "e" * 40
+    rc = cli.main(_push_args(tmp_path, "--operator"))
+    assert rc == 0
+    mock_gp.setup_operator_signing.assert_called_once_with(str(tmp_path / "rippled"))
+    mock_gp.setup_signing.assert_not_called()
+    mock_gp.push.assert_called_once_with(str(tmp_path / "rippled"), "Transia-RnD", "rippled", "alphanet", force=True,
+                                         operator=True)

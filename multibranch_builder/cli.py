@@ -135,6 +135,9 @@ def cmd_push(args: argparse.Namespace) -> int:
     if record.get("status") != SUCCESS:
         sys.exit(f"[multibranch-builder] build status is {record.get('status')!r}, not SUCCESS — refusing to push")
     manifest = _load_manifest(Path(args.manifest) if args.manifest else workdir / MANIFEST_FILE)
+    if record.get("composed_sha") != manifest.composed_sha:
+        sys.exit(f"[multibranch-builder] build.json was built from {str(record.get('composed_sha'))[:12]}, "
+                 f"not the manifest's composed_sha {manifest.composed_sha[:12]} — build again")
     target_text = args.target or manifest.target
     if not target_text:
         sys.exit("[multibranch-builder] no --target and the manifest names none")
@@ -147,9 +150,12 @@ def cmd_push(args: argparse.Namespace) -> int:
     message = (f"compose: {target.branch} from {manifest.base} @ {manifest.base_sha[:8]} "
                f"({len(manifest.branches)} branches)\n\n{manifest.trailer()}")
     try:
-        git_push.setup_signing(tree)
+        if args.operator:
+            git_push.setup_operator_signing(tree)
+        else:
+            git_push.setup_signing(tree)
         sha = git_push.commit_all(tree, message, include_untracked=False, allow_empty=True)
-        git_push.push(tree, target.owner, target.repo, target.branch, force=True)
+        git_push.push(tree, target.owner, target.repo, target.branch, force=True, operator=args.operator)
     except (git_push.SigningNotConfigured, RuntimeError) as e:
         sys.exit(f"[multibranch-builder] {e}")
     print(f"pushed {sha} -> {target.label}")
@@ -210,6 +216,8 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--target", help="owner/repo@branch (default: the manifest's target)")
     p.add_argument("--manifest", help="manifest.json (default: <workdir>/manifest.json)")
     p.add_argument("--build", help="build.json; status must be SUCCESS (default: <workdir>/build.json)")
+    p.add_argument("--operator", action="store_true",
+                   help="sign with the global git identity and user.signingkey, push with the gh login")
     p.set_defaults(func=cmd_push)
 
     m = sub.add_parser("manifest", help="print the manifest trailer")

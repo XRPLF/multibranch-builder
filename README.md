@@ -146,12 +146,12 @@ multibranch-builder build    --workdir DIR [--tree PATH | --src URL] [--set KEY=
 
 ```
 multibranch-builder push     --workdir DIR [--tree PATH] [--manifest PATH] [--build PATH]
-                             [--target owner/repo@branch]
+                             [--target owner/repo@branch] [--operator]
 ```
 
 - Paths default from `--workdir`; without it all three must be given.
-- Refuses unless `build.json` exists with `status == SUCCESS`, the manifest records no
-  `conflict` and a `composed_sha`, and the tree's HEAD is that `composed_sha`.
+- Refuses unless `build.json` exists with `status == SUCCESS` and the manifest's `composed_sha`,
+  the manifest records no `conflict`, and the tree's HEAD is that `composed_sha`.
 - `--target` defaults to the manifest's `target` (the conf's `target` line).
 - Configures signing from the environment, creates one signed commit on top of the composed
   tree (an empty commit when nothing else changed) whose message is
@@ -159,6 +159,9 @@ multibranch-builder push     --workdir DIR [--tree PATH] [--manifest PATH] [--bu
   `Multibranch-Builder-Manifest: <compact manifest json>`, verifies the signature with
   `git verify-commit HEAD`, and pushes with `--force-with-lease=refs/heads/<branch>:<sha the
   branch has right now>` over PAT-authenticated HTTPS. Unsigned, or without a PAT, it refuses.
+- `--operator` is for a run from an operator's workstation: the commit is signed with the
+  global git config's `user.name`, `user.email` and `user.signingkey`, and the push
+  authenticates with `gh auth token`. The service variables below are not read.
 
 ```
 multibranch-builder manifest DIR [--markdown]
@@ -174,7 +177,7 @@ Read at call time, never at import, never printed.
 
 | variable | used by | meaning |
 |---|---|---|
-| `GITHUB_BOT_PAT` | push | PAT of the service account; the only credential that can push |
+| `GITHUB_BOT_PAT` | push | PAT of the service account; without `--operator`, the only credential that can push |
 | `GIT_BOT_NAME` | compose, push | git `user.name`; compose falls back to `multibranch-builder` |
 | `GIT_BOT_EMAIL` | compose, push | git `user.email`; must match a uid on the signing key |
 | `GIT_SIGNING_KEY` | push | the armored GPG private key, or its base64 |

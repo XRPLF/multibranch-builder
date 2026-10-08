@@ -1,4 +1,5 @@
-"""GPG-signed commit and PAT-authenticated push as the service identity; refuses anything less."""
+"""GPG-signed commit and token-authenticated push as the service identity or, with --operator, the
+workstation's own git and gh login; refuses anything unsigned."""
 
 from __future__ import annotations
 
@@ -86,6 +87,34 @@ def setup_signing(repo_dir: str) -> str:
     return key_id
 
 
+def _global_git(key: str) -> str:
+    return _run(["git", "config", "--global", "--get", key], check=False).stdout.strip()
+
+
+def setup_operator_signing(repo_dir: str) -> str:
+    """Configure `repo_dir` to sign as the operator: the global git identity and user.signingkey."""
+    _operator_token()
+    name, email, key_id = (_global_git(k) for k in ("user.name", "user.email", "user.signingkey"))
+    if not (name and email and key_id):
+        raise SigningNotConfigured(
+            "--operator needs user.name, user.email and user.signingkey in the global git config."
+        )
+    for key, value in (("user.name", name), ("user.email", email), ("user.signingkey", key_id),
+                       ("commit.gpgsign", "true")):
+        _run(["git", "config", key, value], cwd=repo_dir)
+    _log(f"Operator signing configured ({email})")
+    return key_id
+
+
+def _operator_token() -> str:
+    """The token `gh` is logged in with."""
+    result = _run(["gh", "auth", "token"], check=False)
+    token = result.stdout.strip()
+    if result.returncode != 0 or not token:
+        raise SigningNotConfigured("--operator needs `gh auth login`; `gh auth token` returned nothing.")
+    return token
+
+
 def commit_all(repo_dir: str, message: str, *, include_untracked: bool = True,
                allow_empty: bool = False) -> str:
     """Stage changes and create one signed commit; return the new HEAD sha."""
@@ -114,12 +143,14 @@ def remote_sha(url: str, branch: str, token: str) -> str:
     return first[0] if first else ""
 
 
-def push(repo_dir: str, owner: str, repo: str, branch: str, *, force: bool = False) -> None:
-    """Push a signed HEAD to `owner/repo:branch` over PAT-authenticated HTTPS.
+def push(repo_dir: str, owner: str, repo: str, branch: str, *, force: bool = False,
+         operator: bool = False) -> None:
+    """Push a signed HEAD to `owner/repo:branch` over token-authenticated HTTPS.
 
-    `force` uses `--force-with-lease` pinned to the sha the branch has right now.
+    `force` uses `--force-with-lease` pinned to the sha the branch has right now. `operator`
+    authenticates with the `gh` login instead of GITHUB_BOT_PAT.
     """
-    _, _, token = _service_identity_and_token()
+    token = _operator_token() if operator else _service_identity_and_token()[2]
     if not head_is_signed(repo_dir):
         raise SigningNotConfigured("HEAD is not GPG-signed — refusing to push an unverified commit.")
     url = f"https://x-access-token:{token}@github.com/{owner}/{repo}.git"

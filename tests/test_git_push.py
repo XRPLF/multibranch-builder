@@ -75,6 +75,43 @@ class TestSetupSigning:
             git_push.setup_signing("/w")
 
 
+class TestSetupOperatorSigning:
+    """setup_operator_signing copies the global git identity and signing key into the repo."""
+
+    @patch("multibranch_builder.git_push._run")
+    def test_configures_repo_from_global_config(self, mock_run, no_identity):
+        mock_run.side_effect = [
+            _completed(stdout="gho_operator\n"),  # gh auth token
+            _completed(stdout="Denis Angell\n"), _completed(stdout="dangell@transia.co\n"),
+            _completed(stdout="12AE6AAD\n"),  # git config --global --get x3
+            _completed(), _completed(), _completed(), _completed(),  # git config x4
+        ]
+        assert git_push.setup_operator_signing("/w") == "12AE6AAD"
+        config_calls = [c.args[0] for c in mock_run.call_args_list[4:]]
+        assert config_calls == [
+            ["git", "config", "user.name", "Denis Angell"],
+            ["git", "config", "user.email", "dangell@transia.co"],
+            ["git", "config", "user.signingkey", "12AE6AAD"],
+            ["git", "config", "commit.gpgsign", "true"],
+        ]
+        assert all(c.kwargs.get("cwd") == "/w" for c in mock_run.call_args_list[4:])
+
+    @patch("multibranch_builder.git_push._run")
+    def test_raises_without_a_signing_key(self, mock_run, no_identity):
+        mock_run.side_effect = [_completed(stdout="gho_operator\n"), _completed(stdout="Denis\n"),
+                                _completed(stdout="d@x\n"), _completed(returncode=1)]
+        with pytest.raises(SigningNotConfigured, match="user.signingkey"):
+            git_push.setup_operator_signing("/w")
+
+
+    @patch("multibranch_builder.git_push._run")
+    def test_raises_before_any_commit_without_gh_login(self, mock_run, no_identity):
+        mock_run.return_value = _completed(returncode=1)
+        with pytest.raises(SigningNotConfigured, match="gh auth login"):
+            git_push.setup_operator_signing("/w")
+        assert mock_run.call_count == 1
+
+
 class TestCommitAll:
     """commit_all stages everything and makes one signed commit."""
 
@@ -148,6 +185,23 @@ class TestPush:
         with pytest.raises(SigningNotConfigured, match="not GPG-signed"):
             git_push.push("/w", "o", "r", "b")
         assert all(c.args[0][:2] != ["git", "push"] for c in mock_run.call_args_list)
+
+    @patch("multibranch_builder.git_push._run")
+    def test_operator_pushes_with_the_gh_token(self, mock_run, no_identity):
+        mock_run.side_effect = [
+            _completed(stdout="gho_operator\n"),  # gh auth token
+            _completed(),  # git verify-commit HEAD
+            _completed(stdout=""),  # git ls-remote
+            _completed(),  # git push
+        ]
+        git_push.push("/w", "XRPLF", "xrpld-private", "b", force=True, operator=True)
+        assert "https://x-access-token:gho_operator@github.com/XRPLF/xrpld-private.git" in mock_run.call_args.args[0]
+
+    @patch("multibranch_builder.git_push._run")
+    def test_operator_refuses_without_gh_login(self, mock_run, no_identity):
+        mock_run.return_value = _completed(returncode=1)
+        with pytest.raises(SigningNotConfigured, match="gh auth login"):
+            git_push.push("/w", "o", "r", "b", operator=True)
 
     def test_refuses_without_pat(self, no_identity):
         with pytest.raises(SigningNotConfigured, match="GITHUB_BOT_PAT"):
