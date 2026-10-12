@@ -6,6 +6,8 @@ substitutions:
   _AR: "us-central1-docker.pkg.dev/xrplf-perf-network/xrpld"
   _TAG: "dev"
   _FORCE_SUPPORTED: "OFF"
+  # ON skips the strip of xrpld and validator-keys.
+  _SYMBOLS: "OFF"
   # The composed commit and branch, for cmake's version in a tree uploaded without .git.
   _GIT_SHA: ""
   _GIT_BRANCH: ""
@@ -25,6 +27,7 @@ steps:
     name: gcr.io/cloud-builders/docker
     args: ["build", "-t", "${_AR}/xrpld:${_TAG}", "-f", "composed.dockerfile",
            "--build-arg", "FORCE_SUPPORTED=${_FORCE_SUPPORTED}",
+           "--build-arg", "SYMBOLS=${_SYMBOLS}",
            "--build-arg", "GIT_SHA=${_GIT_SHA}", "--build-arg", "GIT_BRANCH=${_GIT_BRANCH}",
            "--build-arg", "XRPLD_VERSION=${_XRPLD_VERSION}",
            "--build-arg", "CI_IMAGE=${_CI_IMAGE}", "."]

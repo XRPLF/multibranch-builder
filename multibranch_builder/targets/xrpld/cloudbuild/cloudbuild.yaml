@@ -12,6 +12,8 @@ substitutions:
   _AR: "us-central1-docker.pkg.dev/xrplf-perf-network/xrpld"
   _TAG: "dev"
   _FORCE_SUPPORTED: "OFF"
+  # ON skips the strip of xrpld and validator-keys.
+  _SYMBOLS: "OFF"
   # Resolved per-build from the branch's strategy-matrix; the default only applies
   # when that lookup fails. A stale pin fails the build on missing toolchains.
   _CI_IMAGE: "ghcr.io/xrplf/xrpld/nix-ubuntu:sha-2e25435"
@@ -41,6 +43,8 @@ steps:
       - DATAGRAM_REF=${_DATAGRAM_REF}
       - --build-arg
       - FORCE_SUPPORTED=${_FORCE_SUPPORTED}
+      - --build-arg
+      - SYMBOLS=${_SYMBOLS}
       - --build-arg
       - CI_IMAGE=${_CI_IMAGE}
       - .

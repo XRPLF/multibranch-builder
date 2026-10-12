@@ -38,7 +38,7 @@ is a package under
 
 | kind | tree_dir | default branch | options | settings | prepare | build |
 |---|---|---|---|---|---|---|
-| `xrpld` | `rippled` | `develop` | `force_supported` ON\|OFF, `datagram`, `version` | none | none | Cloud Build with the dockerfiles under `targets/xrpld/cloudbuild/` |
+| `xrpld` | `rippled` | `develop` | `force_supported` ON\|OFF, `datagram`, `version`, `symbols` ON\|OFF | none | none | Cloud Build with the dockerfiles under `targets/xrpld/cloudbuild/` |
 | `xrpl_js` | `xrpl.js` | `main` | none | `definitions` (required) | writes the node's `server_definitions` over `packages/ripple-binary-codec/src/enums/definitions.json` and regenerates `package-lock.json` | checks the tree is clean and its definitions load, then `npm ci`, `npm run build`, `npm test` into `npm-build.log` |
 
 The xrpl_js kind takes `definitions <json-rpc url>` from the conf and calls `server_definitions`
@@ -109,7 +109,9 @@ multibranch-builder compose  (--conf FILE | --src URL [--features URL...]) --wor
   default, `datagram=<ref>` is merged before the conf entries, and `version=<semver>` is the
   version the binary reports: cmake's `FORCE_XRPLD_VERSION` on a tree that reads it, otherwise the
   `versionString` literal in `src/libxrpl/protocol/BuildInfo.cpp` rewritten in the uploaded copy (a
-  release-tag tree); a tree with neither fails the build. Without `version`, a composed
+  release-tag tree); a tree with neither fails the build. `symbols=ON` keeps xrpld's and validator-keys' symbol table
+  and debug info (no `strip -s`; Release builds already carry `-g`) for profiling, and the image
+  tag gets `-sym` so it never replaces the stripped image. Without `version`, a composed
   build reports the version cmake derives from the composed commit, which the build passes in
   place of the `.git` it does not upload.
 - `--dry-run` prints the plan (kind, base, ordered branches, target, settings, options) and

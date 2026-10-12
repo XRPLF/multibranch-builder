@@ -43,6 +43,17 @@ def test_xrpld_options_default_and_normalise():
         XRPLD.validate_options({"version": "dangell7/x-3.4.1+6c4808fd"})
 
 
+def test_xrpld_symbols_option_and_tag_suffix():
+    assert XRPLD.validate_options({"symbols": "OFF"}) == {"force_supported": "OFF"}
+    opts = XRPLD.validate_options({"symbols": "ON"})
+    assert opts == {"force_supported": "OFF", "symbols": "ON"}
+    assert XRPLD.image_suffix(opts) == "-sym"
+    assert XRPLD.image_suffix({"datagram": "XRPLF/rippled@datagram", "symbols": "ON"}) == "-dg-sym"
+    assert XRPLD.image_suffix({"force_supported": "OFF"}) == ""
+    with pytest.raises(ConfError, match="symbols must be ON or OFF"):
+        XRPLD.validate_options({"symbols": "yes"})
+
+
 def test_xrpld_options_reject_unknown_key_and_bad_value():
     with pytest.raises(ConfError, match="does not accept option 'nope'"):
         XRPLD.validate_options({"nope": "1"})

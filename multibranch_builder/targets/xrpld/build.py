@@ -90,6 +90,7 @@ def stamp_version(root: Path, version: str) -> None:
 
 def submit_tree(tree: str | Path, project: str, ar: str, tag: str, *, sha: str, branch: str,
                 pool: str | None = None, force_supported: str = "OFF", version: str = "",
+                symbols: str = "OFF",
                 ci_image: str | None = None, region: str = REGION) -> dict:
     """Upload `tree` (without .git) as `rippled/` and compile it with composed.dockerfile.
 
@@ -107,7 +108,7 @@ def submit_tree(tree: str | Path, project: str, ar: str, tag: str, *, sha: str, 
         build_id, status = submit(
             stage, str(_CLOUDBUILD / "cloudbuild.composed.yaml"),
             {"_AR": ar, "_TAG": tag, "_FORCE_SUPPORTED": force_supported, "_CI_IMAGE": ci_image,
-             "_GIT_SHA": sha, "_GIT_BRANCH": branch, "_XRPLD_VERSION": version},
+             "_GIT_SHA": sha, "_GIT_BRANCH": branch, "_XRPLD_VERSION": version, "_SYMBOLS": symbols},
             project, pool, region)
     finally:
         shutil.rmtree(stage, ignore_errors=True)
@@ -116,7 +117,7 @@ def submit_tree(tree: str | Path, project: str, ar: str, tag: str, *, sha: str, 
 
 def submit_branch(source: BranchEntry, sha: str, project: str, ar: str, tag: str, *,
                   datagram: BranchEntry | None = None, pool: str | None = None,
-                  force_supported: str = "OFF", ci_image: str | None = None,
+                  force_supported: str = "OFF", symbols: str = "OFF", ci_image: str | None = None,
                   region: str = REGION) -> dict:
     """Compile `source` at `sha` (plus the datagram ref, merged inside the build) with xrpld.dockerfile."""
     image = f"{ar}/xrpld:{tag}"
@@ -131,7 +132,8 @@ def submit_branch(source: BranchEntry, sha: str, project: str, ar: str, tag: str
             {"_REPO": source.url, "_BRANCH": sha,
              "_DATAGRAM_REPO": datagram.url if datagram else "",
              "_DATAGRAM_REF": datagram.branch if datagram else "",
-             "_AR": ar, "_TAG": tag, "_FORCE_SUPPORTED": force_supported, "_CI_IMAGE": ci_image},
+             "_AR": ar, "_TAG": tag, "_FORCE_SUPPORTED": force_supported, "_CI_IMAGE": ci_image,
+             "_SYMBOLS": symbols},
             project, pool, region)
     finally:
         shutil.rmtree(stage, ignore_errors=True)
@@ -143,13 +145,15 @@ def build(req: BuildRequest, *, datagram: BranchEntry | None = None) -> dict:
     if not req.project or not req.ar:
         raise BuildError("xrpld builds need --project and --ar")
     force_supported = req.options.get("force_supported", "OFF")
+    symbols = req.options.get("symbols", "OFF")
     if req.tree is not None:
         manifest = req.manifest
         branch = BranchEntry.from_slug(manifest.target or manifest.base).branch if manifest else ""
         return submit_tree(req.tree, req.project, req.ar, req.tag, sha=req.sha, branch=branch,
                            pool=req.pool, force_supported=force_supported,
-                           version=req.options.get("version", ""), ci_image=req.ci_image)
+                           version=req.options.get("version", ""), symbols=symbols, ci_image=req.ci_image)
     if req.source is None:
         raise BuildError("build needs a composed tree or a source branch")
     return submit_branch(req.source, req.sha, req.project, req.ar, req.tag, datagram=datagram,
-                         pool=req.pool, force_supported=force_supported, ci_image=req.ci_image)
+                         pool=req.pool, force_supported=force_supported, symbols=symbols,
+                         ci_image=req.ci_image)

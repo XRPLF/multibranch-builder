@@ -44,6 +44,8 @@ class XrpldKind:
         "version": "semantic version the binary reports: cmake's FORCE_XRPLD_VERSION where the tree "
                    "reads it, else its BuildInfo.cpp versionString in the uploaded copy "
                    "(default: the tree's own)",
+        "symbols": "ON|OFF: keep the symbol table and debug info instead of stripping xrpld and "
+                   "validator-keys, for profiling; the image tag gets -sym (default OFF)",
     }
     settings: dict[str, str] = {}
 
@@ -54,6 +56,10 @@ class XrpldKind:
             raise ConfError(f"force_supported must be ON or OFF, got {out['force_supported']!r}")
         if options.get("datagram"):
             out["datagram"] = BranchEntry.parse(options["datagram"], "datagram").label
+        if options.get("symbols", "OFF") != "OFF":
+            if options["symbols"] != "ON":
+                raise ConfError(f"symbols must be ON or OFF, got {options['symbols']!r}")
+            out["symbols"] = "ON"
         if options.get("version"):
             if not _SEMVER.fullmatch(options["version"]):
                 raise ConfError(f"version must be a semantic version xrpld accepts, got {options['version']!r}")
@@ -84,4 +90,4 @@ class XrpldKind:
         return build_mod.build(req, datagram=self.datagram(req.options))
 
     def image_suffix(self, options: dict[str, str]) -> str:
-        return "-dg" if options.get("datagram") else ""
+        return ("-dg" if options.get("datagram") else "") + ("-sym" if options.get("symbols") == "ON" else "")

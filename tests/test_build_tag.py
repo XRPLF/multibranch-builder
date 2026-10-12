@@ -66,7 +66,8 @@ def test_submit_tree_propagates_ar_into_substitutions_and_image(mock_submit, tmp
     stage, config, subs, project, pool, region = mock_submit.call_args.args
     assert subs == {"_AR": ar, "_TAG": "alphanet-01234567", "_FORCE_SUPPORTED": "ON",
                     "_CI_IMAGE": "ghcr.io/xrplf/xrpld/nix-ubuntu:sha-abc1234",
-                    "_GIT_SHA": "c" * 40, "_GIT_BRANCH": "alphanet", "_XRPLD_VERSION": "3.4.1+01234567"}
+                    "_GIT_SHA": "c" * 40, "_GIT_BRANCH": "alphanet", "_XRPLD_VERSION": "3.4.1+01234567",
+                    "_SYMBOLS": "OFF"}
     assert config.endswith("cloudbuild.composed.yaml")
     assert (project, pool, region) == ("xrplf-alphanet", "xrpld-pool", "us-central1")
 
@@ -134,7 +135,7 @@ def test_cli_build_tree_honors_ar_and_prints_image_last(mock_submit, tmp_path, c
     args, kwargs = mock_submit.call_args
     assert args[1:] == ("xrplf-alphanet", ar, "alphanet-01234567-dg")
     assert kwargs == {"sha": SHA, "branch": "alphanet", "pool": "xrpld-pool", "force_supported": "ON",
-                      "version": "", "ci_image": None}
+                      "version": "", "symbols": "OFF", "ci_image": None}
     assert capsys.readouterr().out.strip().splitlines()[-1] == f"{ar}/xrpld:alphanet-01234567-dg"
     record = json.loads((workdir / "build.json").read_text())
     assert record["ar"] == ar
@@ -257,3 +258,12 @@ def test_submit_tree_stamps_the_upload_not_the_tree(mock_submit, tmp_path):
                        ci_image="img")
     assert 'versionString = "3.4.1+abcdef12"' in seen["text"]
     assert 'versionString = "3.4.1"' in info.read_text()
+
+
+@patch(f"{XBUILD}.submit", return_value=("build-4", "SUCCESS"))
+def test_submit_tree_passes_symbols(mock_submit, tmp_path):
+    tree = tmp_path / "rippled"
+    (tree / "cmake").mkdir(parents=True)
+    (tree / "cmake/XrplVersion.cmake").write_text("if(DEFINED ENV{FORCE_XRPLD_VERSION})\n")
+    xbuild.submit_tree(tree, "p", "ar", "t-sym", sha="c" * 40, branch="b", symbols="ON", ci_image="img")
+    assert mock_submit.call_args.args[2]["_SYMBOLS"] == "ON"

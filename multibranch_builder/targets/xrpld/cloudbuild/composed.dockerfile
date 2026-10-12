@@ -6,6 +6,8 @@ ARG CI_IMAGE=ghcr.io/xrplf/xrpld/nix-ubuntu:sha-2e25435
 # compiling, the same edit the all-amendments CI workflow makes. Required for a network whose
 # chain has amendments enabled that the tree does not mark supported, else nodes amendment-block.
 ARG FORCE_SUPPORTED=OFF
+# ON keeps xrpld's symbol table and debug info (no strip), for profiling.
+ARG SYMBOLS=OFF
 # The upload has no .git: the composed commit and branch take its place for cmake's version, and a
 # non-empty XRPLD_VERSION overrides that version outright.
 ARG GIT_SHA=""
@@ -14,6 +16,7 @@ ARG XRPLD_VERSION=""
 
 FROM ${CI_IMAGE} AS build
 ARG FORCE_SUPPORTED
+ARG SYMBOLS
 ARG GIT_SHA
 ARG GIT_BRANCH
 ARG XRPLD_VERSION
@@ -48,10 +51,10 @@ RUN cd .build && \
     JOBS=$(awk -v c="$(nproc)" '/MemTotal/{m=int($2/1024/1024/3); j=(m<c?m:c); print (j<1?1:j)}' /proc/meminfo) && \
     echo "compiling xrpld with $JOBS parallel jobs (mem-capped)" && \
     cmake --build . --target xrpld --parallel "$JOBS" && \
-    strip -s xrpld && \
+    if [ "$SYMBOLS" != "ON" ]; then strip -s xrpld; fi && \
     mkdir -p /out && cp xrpld /out/ && \
     if cmake --build . --target help | grep -qw 'validator-keys'; then \
-      cmake --build . --target validator-keys --parallel "$JOBS" && strip -s validator-keys && cp validator-keys /out/; \
+      cmake --build . --target validator-keys --parallel "$JOBS" && { [ "$SYMBOLS" = "ON" ] || strip -s validator-keys; } && cp validator-keys /out/; \
     else echo "no validator-keys target on this branch"; fi
 
 FROM ubuntu:jammy AS runtime

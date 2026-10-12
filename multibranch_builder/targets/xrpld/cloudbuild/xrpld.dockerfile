@@ -25,6 +25,8 @@ ARG DATAGRAM_REF=
 # ON compiles every amendment as Supported::Yes. Required for a network whose chain has
 # amendments enabled that the branch does not mark supported, else nodes amendment-block.
 ARG FORCE_SUPPORTED=OFF
+# ON keeps xrpld's symbol table and debug info (no strip), for profiling.
+ARG SYMBOLS=OFF
 
 FROM ${CI_IMAGE} AS build
 ARG REPO
@@ -32,6 +34,7 @@ ARG BRANCH
 ARG DATAGRAM_REPO
 ARG DATAGRAM_REF
 ARG FORCE_SUPPORTED
+ARG SYMBOLS
 USER root
 WORKDIR /work
 RUN git clone "$REPO" rippled && cd rippled && git checkout "$BRANCH" && \
@@ -80,10 +83,10 @@ RUN cd .build && \
     JOBS=$(awk -v c="$(nproc)" '/MemTotal/{m=int($2/1024/1024/3); j=(m<c?m:c); print (j<1?1:j)}' /proc/meminfo) && \
     echo "compiling xrpld with $JOBS parallel jobs (mem-capped)" && \
     cmake --build . --target xrpld --parallel "$JOBS" && \
-    strip -s xrpld && \
+    if [ "$SYMBOLS" != "ON" ]; then strip -s xrpld; fi && \
     mkdir -p /out && cp xrpld /out/ && \
     if cmake --build . --target help | grep -qw 'validator-keys'; then \
-      cmake --build . --target validator-keys --parallel "$JOBS" && strip -s validator-keys && cp validator-keys /out/; \
+      cmake --build . --target validator-keys --parallel "$JOBS" && { [ "$SYMBOLS" = "ON" ] || strip -s validator-keys; } && cp validator-keys /out/; \
     else echo "no validator-keys target on this branch"; fi
 
 FROM ubuntu:jammy AS runtime
