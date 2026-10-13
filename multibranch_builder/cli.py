@@ -1,15 +1,17 @@
-"""`multibranch-builder` — compose, build, push, manifest, kinds."""
+"""`multibranch-builder` — compose, build, push, manifest, kinds, merge-order."""
 
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
-from . import git_push
+from . import git_push, merge_order
 from .build import BUILD_FILE, BuildError, image_tag, load_build, resolve_sha, write_build
 from .compose import MANIFEST_FILE, ComposeError, Manifest, compose
 from .conf import BranchEntry, Config, ConfError, parse_config
+from .errors import MergeOrderError
 from .targets import KINDS, for_base, for_config, for_name
 from .targets.base import BuildRequest, Kind
 
@@ -182,6 +184,16 @@ def cmd_kinds(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_merge_order(args: argparse.Namespace) -> int:
+    try:
+        reports = [merge_order.order_repo(slug, label=args.label, base=args.base, cache_root=Path(args.cache))
+                   for slug in args.repo or ["XRPLF/rippled"]]
+    except MergeOrderError as e:
+        sys.exit(f"[multibranch-builder] {e}")
+    print(json.dumps(reports, indent=2) if args.json else "\n\n".join(merge_order.render(r) for r in reports))
+    return 0
+
+
 def _parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="multibranch-builder",
                                  description="Compose a multi-branch tree, build it, push it signed.")
@@ -228,6 +240,16 @@ def _parser() -> argparse.ArgumentParser:
     k = sub.add_parser("kinds", help="list the kinds: tree_dir, default branch, options, settings")
     k.add_argument("--kind", help="one kind only")
     k.set_defaults(func=cmd_kinds)
+
+    o = sub.add_parser("merge-order", help="order the open PRs carrying a label so the fewest need conflicts resolved")
+    o.add_argument("--repo", action="append", metavar="OWNER/REPO",
+                   help="repository to order; repeatable (default XRPLF/rippled)")
+    o.add_argument("--label", default=merge_order.DEFAULT_LABEL, help="PR label (default %(default)r)")
+    o.add_argument("--base", help="base branch (default: the repository's default branch)")
+    o.add_argument("--cache", default=str(merge_order.DEFAULT_CACHE),
+                   help="directory for the bare cache clones (default %(default)s)")
+    o.add_argument("--json", action="store_true", help="print the reports as JSON")
+    o.set_defaults(func=cmd_merge_order)
     return ap
 
 

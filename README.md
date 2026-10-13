@@ -11,9 +11,10 @@ multibranch-builder build     build the composed tree (or one branch) the kind's
 multibranch-builder push      GPG-sign the composed tree and force-with-lease push it to the target branch
 multibranch-builder manifest  print the manifest trailer (or a markdown table)
 multibranch-builder kinds     list the kinds: tree_dir, default branch, options, settings
+multibranch-builder merge-order  order the open PRs carrying a label so the fewest need conflicts resolved
 ```
 
-Each subcommand reads and writes one work directory:
+Each subcommand except `merge-order` reads and writes one work directory:
 
 ```
 <workdir>/
@@ -178,6 +179,31 @@ multibranch-builder kinds [--kind NAME]
 `manifest` prints the `Multibranch-Builder-Manifest:` trailer, or a per-branch outcome table
 for a job summary. `kinds` prints each kind's tree_dir, default branch, options and settings.
 
+```
+multibranch-builder merge-order [--repo OWNER/REPO ...] [--label LABEL] [--base BRANCH] [--cache DIR] [--json]
+```
+
+- Orders the open PRs carrying `--label` (default `Ready to merge`) on each `--repo` (repeatable,
+  default `XRPLF/rippled`) against `--base` (default the repository's default branch), so the
+  fewest need conflicts resolved. It reads GitHub with `gh` and merges nothing there.
+- A stack, meaning a labelled PR whose base branch is the head branch of another labelled PR, is
+  one unit, merged parent first. A labelled PR stacked on an unlabelled or draft PR, a draft, or
+  one targeting another branch is listed under "Not ordered" with the reason.
+- Conflicts come from `git merge-tree --write-tree` in a bare blobless clone per repository under
+  `--cache` (default `~/.cache/multibranch-builder/merge-order`). The clone fetches the base
+  branch and `refs/pull/<n>/head`, and holds unsigned scratch merge commits that no branch points
+  at. A unit that does not merge onto the base now is listed apart. Every other pair of units is
+  merged in turn.
+- Round 1 is a maximum set of units with no conflicts between them: any unit merged after one it
+  conflicts with needs conflicts resolved. Ties go to the set that leaves the fewest conflicted
+  files to the rest, then to the older PRs. Round 1 is checked by merging it in order, and a unit
+  that conflicts only with the merged combination is deferred. Later rounds apply the same rule
+  to what is left, using the conflicts measured before those PRs are updated.
+- A base branch that requires branches to be up to date still needs each PR after the first to
+  update its branch; the order cuts how many of those updates conflict.
+- `--json` prints one report per repository: `rounds` (each entry with `conflicts_with` and
+  `combination_conflict`), `conflicts_with_base`, `skipped`, `conflicts`.
+
 ## Environment variables
 
 Read at call time, never at import, never printed.
@@ -194,7 +220,8 @@ Read at call time, never at import, never printed.
 
 - `git`, `gpg`
 - `gcloud` (Cloud SDK) authenticated against the build project — xrpld `build`
-- `gh` authenticated — xrpld `build --src` CI image lookup (falls back loudly without it)
+- `gh` authenticated — xrpld `build --src` CI image lookup (falls back loudly without it), and
+  `merge-order`, which needs it to list PRs and fetch private repositories
 - `claude` (`npm install -g @anthropic-ai/claude-code`) — `compose` when a merge conflicts
 - `npm` — xrpl_js `compose`, to regenerate `package-lock.json` (recorded as not refreshed without
   it), and xrpl_js `build`, which needs it (node at the version the tree's `.nvmrc` names)
