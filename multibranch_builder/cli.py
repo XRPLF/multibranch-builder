@@ -186,8 +186,11 @@ def cmd_kinds(args: argparse.Namespace) -> int:
 
 def cmd_merge_order(args: argparse.Namespace) -> int:
     try:
-        reports = [merge_order.order_repo(slug, label=args.label, base=args.base, cache_root=Path(args.cache))
+        reports = [merge_order.order_repo(slug, label=args.label, base=args.base, cache_root=Path(args.cache),
+                                          milestones=tuple(args.milestone or ()))
                    for slug in args.repo or ["XRPLF/rippled"]]
+        if args.conf_out:
+            Path(args.conf_out).write_text(merge_order.compose_conf(reports))
     except MergeOrderError as e:
         sys.exit(f"[multibranch-builder] {e}")
     print(json.dumps(reports, indent=2) if args.json else "\n\n".join(merge_order.render(r) for r in reports))
@@ -241,10 +244,15 @@ def _parser() -> argparse.ArgumentParser:
     k.add_argument("--kind", help="one kind only")
     k.set_defaults(func=cmd_kinds)
 
-    o = sub.add_parser("merge-order", help="order the open PRs carrying a label so the fewest need conflicts resolved")
+    o = sub.add_parser("merge-order", help="order the open PRs carrying a label, or in a milestone, so the fewest "
+                                           "need conflicts resolved")
     o.add_argument("--repo", action="append", metavar="OWNER/REPO",
                    help="repository to order; repeatable (default XRPLF/rippled)")
     o.add_argument("--label", default=merge_order.DEFAULT_LABEL, help="PR label (default %(default)r)")
+    o.add_argument("--milestone", action="append", metavar="TITLE",
+                   help="order the open PRs in this milestone instead of the labelled ones, and list its merged PRs; "
+                        "repeatable")
+    o.add_argument("--conf-out", metavar="FILE", help="also write a compose conf merging every ordered unit")
     o.add_argument("--base", help="base branch (default: the repository's default branch)")
     o.add_argument("--cache", default=str(merge_order.DEFAULT_CACHE),
                    help="directory for the bare cache clones (default %(default)s)")

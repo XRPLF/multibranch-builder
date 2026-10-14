@@ -1,4 +1,4 @@
-"""Order a repository's open PRs carrying a label so the fewest need conflicts resolved.
+"""Order a repository's open PRs carrying a label, or in a milestone, so the fewest need conflicts resolved.
 
 Conflicts come from real three-way merges (`git merge-tree --write-tree`) in a bare blobless
 cache clone. A PR merged after one it conflicts with needs conflicts resolved, so each round
@@ -54,6 +54,7 @@ class PR:
     cross: bool
     ready: bool
     url: str
+    head_repo: str = ""
 
     @property
     def ref(self) -> str:
@@ -80,21 +81,41 @@ class Unit:
 
     def summary(self) -> dict:
         return {"unit": [p.number for p in self.prs], "label": self.label, "title": self.title,
-                "url": self.prs[0].url}
+                "url": self.prs[0].url, "branches": [{"repo": p.head_repo, "branch": p.head} for p in self.prs]}
 
 
 def remote_url(slug: str) -> str:
     return f"https://github.com/{slug}.git"
 
 
-def list_prs(slug: str, label: str) -> list[PR]:
-    """Every open PR of `slug`; `ready` marks those carrying `label`."""
-    fields = "number,title,baseRefName,headRefName,headRefOid,isDraft,isCrossRepository,labels,url"
+def list_prs(slug: str, label: str, milestones: tuple[str, ...] = ()) -> list[PR]:
+    """Every open PR of `slug`; `ready` marks those in one of `milestones`, or carrying `label` when none is given."""
+    fields = ("number,title,baseRefName,headRefName,headRefOid,isDraft,isCrossRepository,labels,url,milestone,"
+              "headRepository,headRepositoryOwner")
     out = _run(["gh", "pr", "list", "-R", slug, "--state", "open", "--limit", "1000", "--json", fields]).stdout
+
+    def ready(p: dict) -> bool:
+        if milestones:
+            return (p.get("milestone") or {}).get("title") in milestones
+        return any(lbl["name"] == label for lbl in p["labels"])
+
     return [PR(number=p["number"], title=p["title"], base=p["baseRefName"], head=p["headRefName"],
-               oid=p["headRefOid"], draft=p["isDraft"], cross=p["isCrossRepository"],
-               ready=any(lbl["name"] == label for lbl in p["labels"]), url=p["url"])
+               oid=p["headRefOid"], draft=p["isDraft"], cross=p["isCrossRepository"], ready=ready(p), url=p["url"],
+               head_repo=f"{p['headRepositoryOwner']['login']}/{p['headRepository']['name']}"
+               if p["isCrossRepository"] else slug)
             for p in json.loads(out)]
+
+
+def merged_prs(slug: str, milestones: tuple[str, ...]) -> list[dict]:
+    """The merged PRs of `slug` in each of `milestones`, oldest merge first."""
+    seen: dict[int, dict] = {}
+    for m in milestones:
+        out = _run(["gh", "pr", "list", "-R", slug, "--state", "merged", "--search", f'milestone:"{m}"',
+                    "--limit", "1000", "--json", "number,title,mergedAt,url"]).stdout
+        for p in json.loads(out):
+            seen[p["number"]] = {"pr": p["number"], "title": p["title"], "merged_at": p["mergedAt"],
+                                 "url": p["url"], "milestone": m}
+    return sorted(seen.values(), key=lambda p: (p["merged_at"], p["pr"]))
 
 
 def default_branch(slug: str) -> str:
@@ -102,8 +123,9 @@ def default_branch(slug: str) -> str:
                  "--jq", ".defaultBranchRef.name"]).stdout.strip()
 
 
-def build_units(prs: list[PR], base: str) -> tuple[list[Unit], dict[int, str]]:
-    """Group ready PRs into stacks rooted on `base`; return the units and why each other ready PR is left out."""
+def build_units(prs: list[PR], base: str, unselected: str = "not labelled") -> tuple[list[Unit], dict[int, str]]:
+    """Group ready PRs into stacks rooted on `base`; return the units and why each other ready PR is left out.
+    `unselected` says why a parent that is not ready was not chosen."""
     by_head = {p.head: p for p in sorted(prs, key=lambda p: p.number) if not p.cross}
     ready = [p for p in prs if p.ready]
     skipped: dict[int, str] = {}
@@ -119,7 +141,7 @@ def build_units(prs: list[PR], base: str) -> tuple[list[Unit], dict[int, str]]:
                 skipped[pr.number] = f"its stack of base branches loops back through #{parent.number}"
                 break
             if not parent.ready or parent.draft:
-                skipped[pr.number] = f"stacked on #{parent.number}, which is {'a draft' if parent.ready else 'not labelled'}"
+                skipped[pr.number] = f"stacked on #{parent.number}, which is {'a draft' if parent.ready else unselected}"
                 break
             seen.add(p.number)
             p = parent
@@ -218,10 +240,11 @@ def max_independent_set(nodes: set[int], adj: dict[int, set[int]],
 
 
 def order_repo(slug: str, *, label: str = DEFAULT_LABEL, base: str | None = None,
-               cache_root: Path = DEFAULT_CACHE) -> dict:
-    """The merge order of `slug`'s open PRs carrying `label`, as a report dict."""
+               cache_root: Path = DEFAULT_CACHE, milestones: tuple[str, ...] = ()) -> dict:
+    """The merge order of `slug`'s open PRs carrying `label`, or in `milestones` when given, as a report dict."""
     base = base or default_branch(slug)
-    units, skipped = build_units(list_prs(slug, label), base)
+    units, skipped = build_units(list_prs(slug, label, milestones=milestones), base,
+                                 "in none of the milestones" if milestones else "not labelled")
     cache = Cache(slug, cache_root)
     _log(f"{slug}: fetching {base} and {sum(len(u.prs) for u in units)} PR heads")
     base_oid = cache.fetch(base, [p for u in units for p in u.prs])
@@ -285,6 +308,8 @@ def order_repo(slug: str, *, label: str = DEFAULT_LABEL, base: str | None = None
     return {
         "repo": slug,
         "label": label,
+        "milestones": list(milestones),
+        "merged": merged_prs(slug, milestones) if milestones else [],
         "base": base,
         "base_oid": base_oid,
         "rounds": out_rounds,
@@ -302,8 +327,11 @@ def _files_brief(files: list[str], limit: int = 3) -> str:
 def render(report: dict) -> str:
     """The report as text: rounds in merge order, then what is left out and every conflicting pair."""
     total = sum(len(r) for r in report["rounds"]) + len(report["conflicts_with_base"])
-    lines = [f"{report['repo']}: {total} merge units labelled {report['label']!r} onto "
-             f"{report['base']} ({report['base_oid'][:10]})"]
+    selector = (f"in milestone {', '.join(repr(m) for m in report['milestones'])}" if report.get("milestones")
+                else f"labelled {report['label']!r}")
+    lines = [f"{report['repo']}: {total} merge units {selector} onto {report['base']} ({report['base_oid'][:10]})"]
+    if report.get("merged"):
+        lines.append(f"Already merged: {len(report['merged'])} PRs")
     n = 0
     for i, entries in enumerate(report["rounds"], 1):
         lines.append("")
@@ -331,3 +359,24 @@ def render(report: dict) -> str:
         lines += ["", "Conflicting pairs"]
         lines += [f"      {c['a']} x {c['b']}: {_files_brief(c['files'])}" for c in report["conflicts"]]
     return "\n".join(lines)
+
+
+def compose_conf(reports: list[dict]) -> str:
+    """A `multibranch-builder compose` conf merging every ordered unit of `reports` onto the first report's base:
+    each repository's rounds in order, then the units that conflict with the base, each stack parent first. PRs left
+    unordered appear as comments with the reason."""
+    if not reports:
+        raise MergeOrderError("no report to write a compose conf from")
+    first = reports[0]
+    out = [f"# {', '.join(r['repo'] for r in reports)} at base {first['base']} ({first['base_oid'][:10]})",
+           f"base   {first['repo']} {first['base']}", ""]
+    for r in reports:
+        if r["base_oid"] != first["base_oid"]:
+            out.append(f"# {r['repo']} {r['base']} is at {r['base_oid'][:10]}, not {first['base_oid'][:10]}")
+        entries = [e for rnd in r["rounds"] for e in rnd] + r["conflicts_with_base"]
+        for e in entries:
+            out.append(f"# {e['label']} {e['title']}")
+            out += [f"{b['repo']} {b['branch']}" for b in e["branches"]]
+        out += [f"# not ordered: #{s['pr']} {s['reason']}" for s in r["skipped"]]
+        out.append("")
+    return "\n".join(out)

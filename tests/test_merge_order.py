@@ -132,7 +132,7 @@ def upstream(tmp_path, monkeypatch):
     bases = {16: "feat/15", 18: "feat/17"}
     prs = [pr(n, base=bases.get(n, "develop"), oid=sha, ready=n != 17) for n, sha in heads.items()]
     monkeypatch.setattr(mo, "remote_url", lambda slug: str(repo))
-    monkeypatch.setattr(mo, "list_prs", lambda slug, label: prs)
+    monkeypatch.setattr(mo, "list_prs", lambda slug, label, milestones=(): prs)
     return repo
 
 
@@ -154,7 +154,7 @@ def test_order_repo_with_real_merges(upstream, tmp_path):
 
 def test_order_repo_rejects_a_head_that_moved(upstream, tmp_path, monkeypatch):
     moved = [p if p.number != 13 else mo.PR(**{**p.__dict__, "oid": "0" * 40}) for p in mo.list_prs("x", "y")]
-    monkeypatch.setattr(mo, "list_prs", lambda slug, label: moved)
+    monkeypatch.setattr(mo, "list_prs", lambda slug, label, milestones=(): moved)
     with pytest.raises(mo.MergeOrderError, match="#13: fetched"):
         mo.order_repo("XRPLF/rippled", base="develop", cache_root=tmp_path / "cache")
 
@@ -177,7 +177,7 @@ def test_combination_conflict_defers_one_unit_and_repicks(monkeypatch, tmp_path)
             return f"{onto}+{unit.key}", []
 
     monkeypatch.setattr(mo, "Cache", FakeCache)
-    monkeypatch.setattr(mo, "list_prs", lambda slug, label: [pr(n) for n in (1, 2, 3, 4)])
+    monkeypatch.setattr(mo, "list_prs", lambda slug, label, milestones=(): [pr(n) for n in (1, 2, 3, 4)])
     report = mo.order_repo("x/y", base="develop", cache_root=tmp_path)
     assert [[e["label"] for e in r] for r in report["rounds"]] == [["#1", "#2", "#4"], ["#3"]]
     deferred = report["rounds"][1][0]
@@ -188,7 +188,7 @@ def test_combination_conflict_defers_one_unit_and_repicks(monkeypatch, tmp_path)
 def test_cli_orders_only_the_named_repositories(monkeypatch, capsys):
     calls = []
 
-    def fake_order(slug, *, label, base, cache_root):
+    def fake_order(slug, *, label, base, cache_root, milestones=()):
         calls.append((slug, label, base))
         return {"repo": slug}
 
@@ -209,3 +209,94 @@ def test_cli_reports_a_merge_order_error(monkeypatch):
     monkeypatch.setattr(mo, "order_repo", fail)
     with pytest.raises(SystemExit, match=r"\[multibranch-builder\] boom"):
         cli.main(["merge-order"])
+
+
+def gh_pr(number, base="develop", head=None, *, milestone=None, labels=(), cross=False, owner="XRPLF"):
+    return {"number": number, "title": f"title {number}", "baseRefName": base, "headRefName": head or f"feat/{number}",
+            "headRefOid": "a" * 40, "isDraft": False, "isCrossRepository": cross,
+            "labels": [{"name": n} for n in labels], "url": f"u/{number}",
+            "milestone": {"title": milestone} if milestone else None,
+            "headRepository": {"name": "rippled"}, "headRepositoryOwner": {"login": owner}}
+
+
+def fake_gh(monkeypatch, open_prs, merged=()):
+    def run(cmd, env=None, ok=(0,)):
+        state = cmd[cmd.index("--state") + 1]
+        rows = list(open_prs) if state == "open" else [p for p in merged if f'milestone:"{p["ms"]}"' in cmd]
+        return subprocess.CompletedProcess(cmd, 0, json.dumps(rows), "")
+    monkeypatch.setattr(mo, "_run", run)
+
+
+def test_milestone_selects_by_milestone_not_label(monkeypatch):
+    fake_gh(monkeypatch, [gh_pr(1, milestone="3.5.0"), gh_pr(2, labels=["Ready to merge"]),
+                          gh_pr(3, milestone="3.5.0 (tests)"), gh_pr(4, milestone="3.6.0", labels=["Ready to merge"])])
+    by_label = {p.number: p.ready for p in mo.list_prs("XRPLF/rippled", "Ready to merge")}
+    by_ms = {p.number: p.ready for p in mo.list_prs("XRPLF/rippled", "Ready to merge",
+                                                     milestones=("3.5.0", "3.5.0 (tests)"))}
+    assert by_label == {1: False, 2: True, 3: False, 4: True}
+    assert by_ms == {1: True, 2: False, 3: True, 4: False}
+
+
+def test_head_repo_names_the_fork_for_a_cross_repository_pr(monkeypatch):
+    fake_gh(monkeypatch, [gh_pr(1), gh_pr(2, cross=True, owner="someone", head="fix")])
+    heads = {p.number: (p.head_repo, p.head) for p in mo.list_prs("XRPLF/rippled", "x")}
+    assert heads == {1: ("XRPLF/rippled", "feat/1"), 2: ("someone/rippled", "fix")}
+
+
+def test_a_milestone_pr_stacked_on_a_branch_outside_the_milestone_is_not_ordered(monkeypatch):
+    fake_gh(monkeypatch, [gh_pr(1, milestone="3.6.0"), gh_pr(2, base="feat/1", milestone="3.5.0")])
+    units, skipped = mo.build_units(mo.list_prs("x/y", "l", milestones=("3.5.0",)), "develop",
+                                    "in none of the milestones")
+    assert units == [] and skipped == {2: "stacked on #1, which is in none of the milestones"}
+
+
+def test_merged_prs_lists_each_milestone_once_oldest_first(monkeypatch):
+    merged = [{"number": 7, "title": "b", "mergedAt": "2026-10-02T00:00:00Z", "url": "u/7", "ms": "3.5.0"},
+              {"number": 5, "title": "a", "mergedAt": "2026-10-01T00:00:00Z", "url": "u/5", "ms": "3.5.0"}]
+    fake_gh(monkeypatch, [], merged)
+    assert [p["pr"] for p in mo.merged_prs("x/y", ("3.5.0",))] == [5, 7]
+
+
+def report(repo, rounds, stale=(), skipped=(), base_oid="b" * 40):
+    def unit(numbers, repo_of=repo):
+        return {"unit": numbers, "label": " → ".join(f"#{n}" for n in numbers), "title": f"title {numbers[0]}",
+                "branches": [{"repo": repo_of, "branch": f"feat/{n}"} for n in numbers]}
+    return {"repo": repo, "base": "develop", "base_oid": base_oid, "label": "l", "milestones": ["3.5.0"],
+            "rounds": [[unit(u) for u in r] for r in rounds], "conflicts_with_base": [unit(u) for u in stale],
+            "skipped": [{"pr": n, "reason": "why"} for n in skipped], "conflicts": []}
+
+
+def test_compose_conf_lists_rounds_then_stale_units_parent_first_with_skips_as_comments():
+    text = mo.compose_conf([report("XRPLF/rippled", [[[1, 2]], [[3]]], stale=[[4]], skipped=[9]),
+                            report("XRPLF/other", [[[5]]])])
+    lines = [ln for ln in text.splitlines() if ln and not ln.startswith("#")]
+    assert lines == ["base   XRPLF/rippled develop", "XRPLF/rippled feat/1", "XRPLF/rippled feat/2",
+                     "XRPLF/rippled feat/3", "XRPLF/rippled feat/4", "XRPLF/other feat/5"]
+    assert "# not ordered: #9 why" in text
+
+
+def test_compose_conf_notes_a_repository_whose_base_differs():
+    text = mo.compose_conf([report("a/r", [[[1]]]), report("b/r", [[[2]]], base_oid="c" * 40)])
+    assert "# b/r develop is at cccccccccc, not bbbbbbbbbb" in text
+
+
+def test_compose_conf_is_read_back_by_the_conf_parser():
+    from multibranch_builder.conf import parse_config_text
+    conf = parse_config_text(mo.compose_conf([report("XRPLF/rippled", [[[1, 2]]])]))
+    assert [(f"{b.owner}/{b.repo}", b.branch) for b in conf.branches] == [("XRPLF/rippled", "feat/1"),
+                                                                         ("XRPLF/rippled", "feat/2")]
+
+
+def test_cli_passes_milestones_and_writes_the_conf(monkeypatch, tmp_path, capsys):
+    seen = []
+
+    def fake_order(slug, *, label, base, cache_root, milestones=()):
+        seen.append((slug, milestones))
+        return report(slug, [[[1]]])
+
+    monkeypatch.setattr(mo, "order_repo", fake_order)
+    out = tmp_path / "c.conf"
+    cli.main(["merge-order", "--repo", "a/r", "--milestone", "3.5.0", "--milestone", "3.5.0 (tests)",
+              "--conf-out", str(out), "--json"])
+    assert seen == [("a/r", ("3.5.0", "3.5.0 (tests)"))]
+    assert "a/r feat/1" in out.read_text()
