@@ -11,7 +11,7 @@ multibranch-builder build     build the composed tree (or one branch) the kind's
 multibranch-builder push      GPG-sign the composed tree and force-with-lease push it to the target branch
 multibranch-builder manifest  print the manifest trailer (or a markdown table)
 multibranch-builder kinds     list the kinds: tree_dir, default branch, options, settings
-multibranch-builder merge-order  order the open PRs carrying a label so the fewest need conflicts resolved
+multibranch-builder merge-order  order the open PRs carrying a label, or in a milestone, so the fewest need conflicts resolved
 ```
 
 Each subcommand except `merge-order` reads and writes one work directory:
@@ -180,7 +180,8 @@ multibranch-builder kinds [--kind NAME]
 for a job summary. `kinds` prints each kind's tree_dir, default branch, options and settings.
 
 ```
-multibranch-builder merge-order [--repo OWNER/REPO ...] [--label LABEL] [--base BRANCH] [--cache DIR] [--json]
+multibranch-builder merge-order [--repo OWNER/REPO ...] [--label LABEL | --milestone TITLE ...] [--base BRANCH]
+                                [--cache DIR] [--conf-out FILE] [--json]
 ```
 
 - Orders the open PRs carrying `--label` (default `Ready to merge`) on each `--repo` (repeatable,
@@ -201,8 +202,18 @@ multibranch-builder merge-order [--repo OWNER/REPO ...] [--label LABEL] [--base 
   to what is left, using the conflicts measured before those PRs are updated.
 - A base branch that requires branches to be up to date still needs each PR after the first to
   update its branch; the order cuts how many of those updates conflict.
-- `--json` prints one report per repository: `rounds` (each entry with `conflicts_with` and
-  `combination_conflict`), `conflicts_with_base`, `skipped`, `conflicts`.
+- `--milestone` (repeatable) orders the open PRs in any of the named milestones instead of the
+  labelled ones, and lists each repository's merged PRs in them, so one run answers what a release
+  holds. A PR stacked on one outside the milestones is listed under "Not ordered".
+- `--milestone` and `--label` are exclusive.
+- `--conf-out` also writes a `compose` conf that merges every ordered unit: each repository's
+  rounds, then the units that do not merge onto the base, each stack parent first. Every
+  repository's branches merge onto the first repository's base branch; a repository whose base
+  branch is at another commit gets a comment saying so. Fork PRs name their fork. Unordered PRs,
+  and a unit whose fork is deleted or whose branch name holds `#`, appear as comments.
+- `--json` prints one report per repository: `rounds` (each entry with `conflicts_with`,
+  `combination_conflict` and its `branches`), `conflicts_with_base`, `skipped`, `conflicts`,
+  `milestones` and `merged`.
 
 ## Environment variables
 
