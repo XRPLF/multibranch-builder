@@ -99,22 +99,31 @@ def list_prs(slug: str, label: str, milestones: tuple[str, ...] = ()) -> list[PR
             return (p.get("milestone") or {}).get("title") in milestones
         return any(lbl["name"] == label for lbl in p["labels"])
 
+    def head_repo(p: dict) -> str:
+        if not p["isCrossRepository"]:
+            return slug
+        owner, repo = (p.get("headRepositoryOwner") or {}).get("login"), (p.get("headRepository") or {}).get("name")
+        return f"{owner}/{repo}" if owner and repo else ""  # a deleted fork has neither
+
     return [PR(number=p["number"], title=p["title"], base=p["baseRefName"], head=p["headRefName"],
                oid=p["headRefOid"], draft=p["isDraft"], cross=p["isCrossRepository"], ready=ready(p), url=p["url"],
-               head_repo=f"{p['headRepositoryOwner']['login']}/{p['headRepository']['name']}"
-               if p["isCrossRepository"] else slug)
+               head_repo=head_repo(p))
             for p in json.loads(out)]
 
 
 def merged_prs(slug: str, milestones: tuple[str, ...]) -> list[dict]:
     """The merged PRs of `slug` in each of `milestones`, oldest merge first."""
+    limit = 1000
     seen: dict[int, dict] = {}
     for m in milestones:
-        out = _run(["gh", "pr", "list", "-R", slug, "--state", "merged", "--search", f'milestone:"{m}"',
-                    "--limit", "1000", "--json", "number,title,mergedAt,url"]).stdout
-        for p in json.loads(out):
-            seen[p["number"]] = {"pr": p["number"], "title": p["title"], "merged_at": p["mergedAt"],
-                                 "url": p["url"], "milestone": m}
+        quoted = m.replace("\\", "\\\\").replace('"', '\\"')
+        rows = json.loads(_run(["gh", "pr", "list", "-R", slug, "--state", "merged", "--search", f'milestone:"{quoted}"',
+                                "--limit", str(limit), "--json", "number,title,mergedAt,url"]).stdout)
+        if len(rows) >= limit:
+            _log(f"{slug}: milestone {m!r} returned {limit} merged PRs, the search limit; the list may be cut short")
+        for p in rows:
+            seen.setdefault(p["number"], {"pr": p["number"], "title": p["title"], "merged_at": p["mergedAt"],
+                                          "url": p["url"], "milestone": m})
     return sorted(seen.values(), key=lambda p: (p["merged_at"], p["pr"]))
 
 
@@ -331,7 +340,8 @@ def render(report: dict) -> str:
                 else f"labelled {report['label']!r}")
     lines = [f"{report['repo']}: {total} merge units {selector} onto {report['base']} ({report['base_oid'][:10]})"]
     if report.get("merged"):
-        lines.append(f"Already merged: {len(report['merged'])} PRs")
+        lines += ["", f"Already merged: {len(report['merged'])} PRs"]
+        lines += [f"      #{m['pr']:<27} {m['title']}" for m in report["merged"]]
     n = 0
     for i, entries in enumerate(report["rounds"], 1):
         lines.append("")
@@ -375,6 +385,11 @@ def compose_conf(reports: list[dict]) -> str:
             out.append(f"# {r['repo']} {r['base']} is at {r['base_oid'][:10]}, not {first['base_oid'][:10]}")
         entries = [e for rnd in r["rounds"] for e in rnd] + r["conflicts_with_base"]
         for e in entries:
+            gone = [b for b in e["branches"] if not b["repo"] or "#" in b["branch"]]
+            if gone:
+                out.append(f"# left out: {e['label']} {e['title']}: a head repository is gone or a branch name "
+                           f"holds '#', which the conf cannot carry")
+                continue
             out.append(f"# {e['label']} {e['title']}")
             out += [f"{b['repo']} {b['branch']}" for b in e["branches"]]
         out += [f"# not ordered: #{s['pr']} {s['reason']}" for s in r["skipped"]]

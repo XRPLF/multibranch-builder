@@ -260,7 +260,8 @@ def test_merged_prs_lists_each_milestone_once_oldest_first(monkeypatch):
 def report(repo, rounds, stale=(), skipped=(), base_oid="b" * 40):
     def unit(numbers, repo_of=repo):
         return {"unit": numbers, "label": " → ".join(f"#{n}" for n in numbers), "title": f"title {numbers[0]}",
-                "branches": [{"repo": repo_of, "branch": f"feat/{n}"} for n in numbers]}
+                "branches": [{"repo": repo_of, "branch": f"feat/{n}"} for n in numbers], "conflicts_with": {},
+                "combination_conflict": [], "files": []}
     return {"repo": repo, "base": "develop", "base_oid": base_oid, "label": "l", "milestones": ["3.5.0"],
             "rounds": [[unit(u) for u in r] for r in rounds], "conflicts_with_base": [unit(u) for u in stale],
             "skipped": [{"pr": n, "reason": "why"} for n in skipped], "conflicts": []}
@@ -300,3 +301,65 @@ def test_cli_passes_milestones_and_writes_the_conf(monkeypatch, tmp_path, capsys
               "--conf-out", str(out), "--json"])
     assert seen == [("a/r", ("3.5.0", "3.5.0 (tests)"))]
     assert "a/r feat/1" in out.read_text()
+
+
+def test_a_deleted_fork_gives_an_empty_head_repo_and_is_left_out_of_the_conf(monkeypatch):
+    gone = gh_pr(2, cross=True, head="fix")
+    gone["headRepository"] = gone["headRepositoryOwner"] = None
+    fake_gh(monkeypatch, [gh_pr(1), gone])
+    assert {p.number: p.head_repo for p in mo.list_prs("XRPLF/rippled", "x")} == {1: "XRPLF/rippled", 2: ""}
+    rep = report("XRPLF/rippled", [[[1], [2]]])
+    rep["rounds"][0][1]["branches"][0]["repo"] = ""
+    text = mo.compose_conf([rep])
+    assert "XRPLF/rippled feat/1" in text and "feat/2" not in text.replace("# left out: #2", "")
+    assert "# left out: #2 title 2: a head repository is gone" in text
+
+
+def test_a_branch_name_holding_a_hash_is_left_out_of_the_conf():
+    rep = report("a/r", [[[1]]])
+    rep["rounds"][0][0]["branches"][0]["branch"] = "fix#1"
+    text = mo.compose_conf([rep])
+    assert [ln for ln in text.splitlines() if ln and not ln.startswith("#")] == ["base   a/r develop"]
+
+
+def test_merged_prs_escapes_quotes_and_keeps_the_first_milestone_of_a_pr_in_two(monkeypatch):
+    searches = []
+
+    def run(cmd, env=None, ok=(0,)):
+        searches.append(cmd[cmd.index("--search") + 1])
+        row = {"number": 5, "title": "a", "mergedAt": "2026-10-01T00:00:00Z", "url": "u/5"}
+        return subprocess.CompletedProcess(cmd, 0, json.dumps([row]), "")
+
+    monkeypatch.setattr(mo, "_run", run)
+    merged = mo.merged_prs("x/y", ('say "hi"', "b"))
+    assert searches == ['milestone:"say \\"hi\\""', 'milestone:"b"']
+    assert merged == [{"pr": 5, "title": "a", "merged_at": "2026-10-01T00:00:00Z", "url": "u/5",
+                       "milestone": 'say "hi"'}]
+
+
+def test_render_lists_the_merged_prs_in_milestone_mode():
+    rep = report("a/r", [[[1]]])
+    rep["merged"] = [{"pr": 5, "title": "done thing", "merged_at": "t", "url": "u", "milestone": "3.5.0"}]
+    text = mo.render(rep)
+    assert "in milestone '3.5.0'" in text and "#5" in text and "done thing" in text
+
+
+def test_cli_refuses_label_with_milestone(monkeypatch):
+    with pytest.raises(SystemExit):
+        cli.main(["merge-order", "--label", "x", "--milestone", "3.5.0"])
+
+
+def test_order_repo_in_milestone_mode_feeds_compose_conf_end_to_end(upstream, tmp_path, monkeypatch):
+    prs = [mo.PR(**{**p.__dict__, "head_repo": "XRPLF/rippled"}) for p in mo.list_prs("x", "y")]
+    monkeypatch.setattr(mo, "list_prs", lambda slug, label, milestones=(): prs)
+    monkeypatch.setattr(mo, "merged_prs", lambda slug, milestones: [{"pr": 1, "title": "t", "merged_at": "m",
+                                                                     "url": "u", "milestone": milestones[0]}])
+    rep = mo.order_repo("XRPLF/rippled", base="develop", cache_root=tmp_path / "cache", milestones=("3.5.0",))
+    assert rep["milestones"] == ["3.5.0"] and [m["pr"] for m in rep["merged"]] == [1]
+    assert all(b["repo"] == "XRPLF/rippled" for rnd in rep["rounds"] for e in rnd for b in e["branches"])
+    assert {"pr": 18, "reason": "stacked on #17, which is in none of the milestones"} in rep["skipped"]
+    from multibranch_builder.conf import parse_config_text
+    conf = parse_config_text(mo.compose_conf([rep]))
+    branches = [b.branch for b in conf.branches]
+    assert branches.index("feat/15") < branches.index("feat/16")
+    assert "feat/18" not in branches and "feat/17" not in branches

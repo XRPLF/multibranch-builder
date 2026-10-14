@@ -205,10 +205,12 @@ multibranch-builder merge-order [--repo OWNER/REPO ...] [--label LABEL | --miles
 - `--milestone` (repeatable) orders the open PRs in any of the named milestones instead of the
   labelled ones, and lists each repository's merged PRs in them, so one run answers what a release
   holds. A PR stacked on one outside the milestones is listed under "Not ordered".
+- `--milestone` and `--label` are exclusive.
 - `--conf-out` also writes a `compose` conf that merges every ordered unit: each repository's
-  rounds, then the units that do not merge onto the base, each stack parent first, onto the first
-  repository's base. Fork PRs name their fork. Unordered PRs and a repository whose base branch is
-  at another commit appear as comments.
+  rounds, then the units that do not merge onto the base, each stack parent first. Every
+  repository's branches merge onto the first repository's base branch; a repository whose base
+  branch is at another commit gets a comment saying so. Fork PRs name their fork. Unordered PRs,
+  and a unit whose fork is deleted or whose branch name holds `#`, appear as comments.
 - `--json` prints one report per repository: `rounds` (each entry with `conflicts_with`,
   `combination_conflict` and its `branches`), `conflicts_with_base`, `skipped`, `conflicts`,
   `milestones` and `merged`.

@@ -186,7 +186,8 @@ def cmd_kinds(args: argparse.Namespace) -> int:
 
 def cmd_merge_order(args: argparse.Namespace) -> int:
     try:
-        reports = [merge_order.order_repo(slug, label=args.label, base=args.base, cache_root=Path(args.cache),
+        reports = [merge_order.order_repo(slug, label=args.label or merge_order.DEFAULT_LABEL, base=args.base,
+                                          cache_root=Path(args.cache),
                                           milestones=tuple(args.milestone or ()))
                    for slug in args.repo or ["XRPLF/rippled"]]
         if args.conf_out:
@@ -248,8 +249,9 @@ def _parser() -> argparse.ArgumentParser:
                                            "need conflicts resolved")
     o.add_argument("--repo", action="append", metavar="OWNER/REPO",
                    help="repository to order; repeatable (default XRPLF/rippled)")
-    o.add_argument("--label", default=merge_order.DEFAULT_LABEL, help="PR label (default %(default)r)")
-    o.add_argument("--milestone", action="append", metavar="TITLE",
+    select = o.add_mutually_exclusive_group()
+    select.add_argument("--label", help=f"PR label (default {merge_order.DEFAULT_LABEL!r})")
+    select.add_argument("--milestone", action="append", metavar="TITLE",
                    help="order the open PRs in this milestone instead of the labelled ones, and list its merged PRs; "
                         "repeatable")
     o.add_argument("--conf-out", metavar="FILE", help="also write a compose conf merging every ordered unit")
