@@ -278,3 +278,18 @@ def test_real_git_conflict_leaves_the_pre_merge_commit_on_a_plain_abort(tmp_path
                                      resolver=MagicMock(return_value=False)) == CONFLICT
     assert _real_git(repo, "rev-parse", "HEAD") == pre_merge
     assert _real_git(repo, "status", "--porcelain") == ""
+
+
+def test_real_git_conflict_removes_files_the_resolver_left_untracked(tmp_path):
+    repo = _conflicting_repo(tmp_path)
+    pre_merge = _real_git(repo, "rev-parse", "HEAD")
+
+    def littering_resolver(cwd, source_label, base_label):
+        (repo / "scratch-note.txt").write_text("notes\n")
+        (repo / "notes").mkdir()
+        (repo / "notes" / "a.txt").write_text("a\n")
+        return False
+
+    assert merge_source_into_current(str(repo), "incoming", "incoming", "main", resolver=littering_resolver) == CONFLICT
+    assert _real_git(repo, "rev-parse", "HEAD") == pre_merge
+    assert _real_git(repo, "status", "--porcelain", "--untracked-files=all") == ""
