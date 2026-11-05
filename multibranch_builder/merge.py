@@ -152,7 +152,7 @@ def merge_source_into_current(repo_dir: str, source_ref: str, branch_label: str,
             return UP_TO_DATE
         return MERGED
     if merge.returncode != 0 and not conflicted:
-        _log(f"{branch_label}: conflicts auto-resolved (rerere/registry driver)")
+        _log(f"{branch_label}: conflicts auto-resolved (rerere)")
         return AI_RESOLVED
     if resolver(repo_dir, branch_label, base_label):
         return AI_RESOLVED
