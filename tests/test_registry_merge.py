@@ -310,3 +310,83 @@ def test_lead_never_takes_a_closing_line_without_its_opening():
     entry = [c for c in chunks if not isinstance(c, str)][0]
     assert entry.lead == ""
     assert render(chunks) == text
+
+
+def _run_driver(tmp_path, base_text, ours_text, theirs_text, pathname, *flags):
+    """Run the driver as git does (`%O %A %B %P`); return the process and the text left in %A."""
+    base, ours, theirs = tmp_path / "base", tmp_path / "ours", tmp_path / "theirs"
+    base.write_text(base_text)
+    ours.write_text(ours_text)
+    theirs.write_text(theirs_text)
+    proc = subprocess.run(
+        [sys.executable, str(DRIVER), *flags, str(base), str(ours), str(theirs), pathname],
+        capture_output=True, text=True, cwd=tmp_path,
+    )
+    return proc, ours.read_text()
+
+
+LEDGER_OURS_0084 = LEDGER_BASE + (
+    "LEDGER_ENTRY(ltPASSKEY, 0x0084, Passkey, passkey, ({\n"
+    "    {sfAccount, soeREQUIRED},\n"
+    "}))\n"
+)
+LEDGER_THEIRS_0084 = LEDGER_BASE + (
+    "LEDGER_ENTRY(ltCOUPON, 0x0084, Coupon, coupon, ({\n"
+    "    {sfAccount, soeREQUIRED},\n"
+    "}))\n"
+)
+
+
+def test_no_renumber_returns_none_on_a_number_collision():
+    assert merge3(LEDGER_BASE, LEDGER_OURS_0084, LEDGER_THEIRS_0084, "ledger_entries.macro",
+                  renumber=False) is None
+
+
+def test_no_renumber_keeps_an_incoming_number_that_does_not_collide():
+    theirs = LEDGER_BASE + "LEDGER_ENTRY(ltCOUPON, 0x0090, Coupon, coupon, ({\n    {sfAccount, soeREQUIRED},\n}))\n"
+    merged = merge3(LEDGER_BASE, LEDGER_OURS_0084, theirs, "ledger_entries.macro", renumber=False)
+    assert merged is not None
+    assert "ltPASSKEY, 0x0084" in merged and "ltCOUPON, 0x0090" in merged
+
+
+def test_driver_cli_no_renumber_leaves_the_collision_in_conflict_markers(tmp_path):
+    proc, result = _run_driver(tmp_path, LEDGER_BASE, LEDGER_OURS_0084, LEDGER_THEIRS_0084,
+                               "include/xrpl/protocol/detail/ledger_entries.macro", "--no-renumber")
+    assert proc.returncode != 0
+    assert "<<<<<<<" in result
+    assert "ltPASSKEY, 0x0084" in result and "ltCOUPON, 0x0084" in result
+    assert "0x0085" not in result
+
+
+WIDE_BASE = """\
+LEDGER_ENTRY(ltWIDE, 0x0050, Wide, wide, ({
+    {sfAccount, soeREQUIRED},
+    {sfOwner, soeREQUIRED},
+    {sfFlags, soeREQUIRED},
+    {sfSequence, soeREQUIRED},
+    {sfBalance, soeREQUIRED},
+    {sfAmount, soeREQUIRED},
+}))
+"""
+
+
+def test_driver_cli_falls_back_to_a_clean_textual_merge(tmp_path):
+    ours = WIDE_BASE.replace("{sfAccount, soeREQUIRED}", "{sfAccount, soeOPTIONAL}")
+    theirs = WIDE_BASE.replace("{sfAmount, soeREQUIRED}", "{sfAmount, soeOPTIONAL}")
+    assert merge3(WIDE_BASE, ours, theirs, "ledger_entries.macro") is None
+    proc, result = _run_driver(tmp_path, WIDE_BASE, ours, theirs,
+                               "include/xrpl/protocol/detail/ledger_entries.macro")
+    assert proc.returncode == 0, proc.stderr
+    assert result == ours.replace("{sfAmount, soeREQUIRED}", "{sfAmount, soeOPTIONAL}")
+
+
+def test_driver_cli_falls_back_to_textual_conflict_markers(tmp_path):
+    ours = FEATURES_BASE.replace("Supported::Yes, VoteBehavior::DefaultNo)",
+                                 "Supported::Yes, VoteBehavior::DefaultYes)", 1)
+    theirs = FEATURES_BASE.replace("Supported::Yes, VoteBehavior::DefaultNo)",
+                                   "Supported::No,  VoteBehavior::DefaultNo)", 1)
+    proc, result = _run_driver(tmp_path, FEATURES_BASE, ours, theirs,
+                               "include/xrpl/protocol/detail/features.macro")
+    assert proc.returncode != 0
+    assert "<<<<<<<" in result and "=======" in result and ">>>>>>>" in result
+    assert "VoteBehavior::DefaultYes)" in result and "Supported::No,  VoteBehavior" in result

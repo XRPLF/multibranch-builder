@@ -54,6 +54,19 @@ def test_xrpld_symbols_option_and_tag_suffix():
         XRPLD.validate_options({"symbols": "yes"})
 
 
+def test_xrpld_renumber_and_ai_budget_options_returned_only_when_given():
+    assert XRPLD.validate_options({}) == {"force_supported": "OFF"}
+    assert XRPLD.validate_options({"renumber": "OFF"}) == {"force_supported": "OFF", "renumber": "OFF"}
+    assert XRPLD.validate_options({"renumber": "ON"}) == {"force_supported": "OFF", "renumber": "ON"}
+    assert XRPLD.validate_options({"ai_budget_usd": "25"}) == {"force_supported": "OFF", "ai_budget_usd": "25"}
+    assert XRPLD.validate_options({"ai_budget_usd": "2.5"})["ai_budget_usd"] == "2.5"
+    with pytest.raises(ConfError, match="renumber must be ON or OFF"):
+        XRPLD.validate_options({"renumber": "no"})
+    for bad in ("0", "-1", "five", "", "nan", "inf"):
+        with pytest.raises(ConfError, match="ai_budget_usd must be a positive number"):
+            XRPLD.validate_options({"ai_budget_usd": bad})
+
+
 def test_xrpld_options_reject_unknown_key_and_bad_value():
     with pytest.raises(ConfError, match="does not accept option 'nope'"):
         XRPLD.validate_options({"nope": "1"})
@@ -84,17 +97,23 @@ def test_xrpld_prepare_is_a_noop(tmp_path):
 
 def test_xrpld_configure_merge_registers_driver_attributes_and_rerere(tmp_path):
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
-    XRPLD.configure_merge(str(tmp_path))
+    XRPLD.configure_merge(str(tmp_path), {})
 
-    def config(key):
-        return subprocess.run(["git", "config", key], cwd=tmp_path, text=True, capture_output=True).stdout.strip()
+    def config(key, cwd=tmp_path):
+        return subprocess.run(["git", "config", key], cwd=cwd, text=True, capture_output=True).stdout.strip()
 
     assert config("merge.xrplregistry.driver").endswith("registry_merge.py %O %A %B %P")
     assert config("rerere.enabled") == "true" and config("rerere.autoUpdate") == "true"
     attributes = (tmp_path / ".git" / "info" / "attributes").read_text()
     assert attributes.count("merge=xrplregistry") == 5
-    XRPLD.configure_merge(str(tmp_path))
+    XRPLD.configure_merge(str(tmp_path), {"renumber": "ON"})
     assert (tmp_path / ".git" / "info" / "attributes").read_text() == attributes
+    assert config("merge.xrplregistry.driver").endswith("registry_merge.py %O %A %B %P")
+
+    pinned = tmp_path / "pinned"
+    subprocess.run(["git", "init", "-q", str(pinned)], check=True)
+    XRPLD.configure_merge(str(pinned), {"renumber": "OFF"})
+    assert config("merge.xrplregistry.driver", pinned).endswith("registry_merge.py --no-renumber %O %A %B %P")
 
 
 def test_parse_set_pairs():

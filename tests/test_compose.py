@@ -135,8 +135,8 @@ class PreparingKind:
     def validate_settings(self, settings):
         return None
 
-    def configure_merge(self, tree):
-        return None
+    def configure_merge(self, tree, options):
+        self.merge_options = options
 
     def plan(self, branches, options):
         return list(branches)
@@ -195,3 +195,32 @@ def test_rerere_resolutions_survive_a_recompose(upstream, tmp_path):
     assert [b.outcome for b in second.branches] == ["ai-resolved"]
     assert (work / "rippled" / "a.txt").read_text() == "theirs\n"
     assert git(work / "rippled", "status", "--porcelain") == ""
+
+
+def test_compose_passes_options_to_configure_merge(upstream, tmp_path):
+    kind = PreparingKind()
+    compose(_config(BranchEntry("XRPLF", "rippled", "feat/clean")), tmp_path / "work",
+            kind=kind, options={"gen": "x"}, resolver=lambda cwd, b, d: False)
+    assert kind.merge_options == {"gen": "x"}
+
+
+def test_compose_default_resolver_takes_budget_and_pinned_from_options(upstream, tmp_path, monkeypatch):
+    calls = []
+
+    def fake_ai_resolve(cwd, branch_label, base_label, **kwargs):
+        calls.append(kwargs)
+        return resolve_by_taking_theirs(cwd, branch_label, base_label)
+
+    monkeypatch.setattr(compose_mod, "ai_resolve", fake_ai_resolve)
+    branches = [BranchEntry("XRPLF", "rippled", "feat/conflict")]
+    compose(_config(*branches), tmp_path / "pinned", kind=XRPLD,
+            options={"renumber": "OFF", "ai_budget_usd": "25"})
+    compose(_config(*branches), tmp_path / "default", kind=XRPLD, options={})
+    assert calls == [
+        {"guide_path": XRPLD.merge_guide, "budget_usd": 25.0, "pinned": True},
+        {"guide_path": XRPLD.merge_guide, "budget_usd": 5.0, "pinned": False},
+    ]
+    assert git(tmp_path / "pinned" / "rippled", "config", "merge.xrplregistry.driver").endswith(
+        "--no-renumber %O %A %B %P")
+    assert git(tmp_path / "default" / "rippled", "config", "merge.xrplregistry.driver").endswith(
+        "registry_merge.py %O %A %B %P")
