@@ -390,3 +390,14 @@ def test_driver_cli_falls_back_to_textual_conflict_markers(tmp_path):
     assert proc.returncode != 0
     assert "<<<<<<<" in result and "=======" in result and ">>>>>>>" in result
     assert "VoteBehavior::DefaultYes)" in result and "Supported::No,  VoteBehavior" in result
+
+
+def test_driver_cli_labels_the_textual_conflict_markers(tmp_path):
+    ours = FEATURES_BASE.replace("Supported::Yes, VoteBehavior::DefaultNo)",
+                                 "Supported::Yes, VoteBehavior::DefaultYes)", 1)
+    theirs = FEATURES_BASE.replace("Supported::Yes, VoteBehavior::DefaultNo)",
+                                   "Supported::No,  VoteBehavior::DefaultNo)", 1)
+    _, result = _run_driver(tmp_path, FEATURES_BASE, ours, theirs,
+                            "include/xrpl/protocol/detail/features.macro")
+    assert "<<<<<<< include/xrpl/protocol/detail/features.macro (composed)" in result
+    assert ">>>>>>> include/xrpl/protocol/detail/features.macro (incoming)" in result

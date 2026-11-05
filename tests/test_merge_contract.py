@@ -20,6 +20,9 @@ PINNED = ("Numbers are pinned by the operator's registry: keep every entry's num
 ABORT = ["git", "merge", "--abort"]
 RESET = ["git", "reset", "--hard", "HEAD"]
 VERIFY = ["git", "rev-parse", "-q", "--verify", "MERGE_HEAD"]
+HEAD = ["git", "rev-parse", "HEAD"]
+ORIG = ["git", "rev-parse", "ORIG_HEAD"]
+RESET_ORIG = ["git", "reset", "--hard", "ORIG_HEAD"]
 
 
 def _completed(returncode=0, stdout="", stderr=""):
@@ -29,12 +32,15 @@ def _completed(returncode=0, stdout="", stderr=""):
 class FakeGit:
     """Answers the git commands merge_source_into_current issues."""
 
-    def __init__(self, merge_rc=0, conflicted=(), staged_rc=1, abort_rc=0, merge_head_kept=False):
+    def __init__(self, merge_rc=0, conflicted=(), staged_rc=1, abort_rc=0, merge_head_kept=False,
+                 head_moved=False, head_stays_moved=False):
         self.merge_rc = merge_rc
         self.conflicted = list(conflicted)
         self.staged_rc = staged_rc
         self.abort_rc = abort_rc
         self.merge_head_kept = merge_head_kept
+        self.head_moved = head_moved
+        self.head_stays_moved = head_stays_moved
         self.calls = []
 
     def __call__(self, cmd, cwd, check=True):
@@ -43,6 +49,12 @@ class FakeGit:
             return _completed(self.abort_rc)
         if cmd == VERIFY:
             return _completed(0 if self.merge_head_kept else 1)
+        if cmd == RESET_ORIG and not self.head_stays_moved:
+            self.head_moved = False
+        if cmd == HEAD:
+            return _completed(stdout="bbb\n" if self.head_moved else "aaa\n")
+        if cmd == ORIG:
+            return _completed(stdout="aaa\n")
         if cmd[:2] == ["git", "merge"]:
             return _completed(self.merge_rc)
         if cmd[:3] == ["git", "diff", "--name-only"]:
@@ -97,6 +109,19 @@ def test_conflict_resets_when_abort_fails():
     with patch.object(merge, "_run", git):
         assert merge_source_into_current("/w", "r/b", "b", "develop", resolver=MagicMock(return_value=False)) == CONFLICT
     assert git.calls[-3:] == [ABORT, RESET, VERIFY]
+
+
+def test_conflict_resets_a_merge_the_resolver_committed():
+    git = FakeGit(merge_rc=1, conflicted=["src/a.cpp"], head_moved=True)
+    with patch.object(merge, "_run", git):
+        assert merge_source_into_current("/w", "r/b", "b", "develop", resolver=MagicMock(return_value=False)) == CONFLICT
+    assert RESET_ORIG in git.calls
+
+
+def test_raises_when_head_stays_off_the_pre_merge_commit():
+    git = FakeGit(merge_rc=1, conflicted=["src/a.cpp"], head_moved=True, head_stays_moved=True)
+    with patch.object(merge, "_run", git), pytest.raises(ComposeError, match="pre-merge"):
+        merge_source_into_current("/w", "r/b", "b", "develop", resolver=MagicMock(return_value=False))
 
 
 def test_raises_when_merge_head_survives_the_abort():
