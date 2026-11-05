@@ -44,8 +44,8 @@ class Kind(Protocol):
     def validate_settings(self, settings: dict[str, str]) -> None:
         """ConfError on a conf header this kind does not accept or is missing."""
 
-    def configure_merge(self, tree: str) -> None:
-        """Repo-local merge drivers, attributes and rerere for the cloned tree."""
+    def configure_merge(self, tree: str, options: dict[str, str]) -> None:
+        """Repo-local merge drivers, attributes and rerere for the cloned tree, per the validated options."""
 
     def plan(self, branches: list[BranchEntry], options: dict[str, str]) -> list[BranchEntry]:
         """The merge order."""

@@ -4,13 +4,23 @@ import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from multibranch_builder import merge
+from multibranch_builder.errors import ComposeError
 from multibranch_builder.merge import (
     AI_RESOLVED, CONFLICT, MERGED, UP_TO_DATE, ai_resolve, files_with_conflict_markers,
     merge_prompt, merge_source_into_current,
 )
 
 XRPLD_GUIDE = Path(merge.__file__).parent / "targets" / "xrpld" / "merge.md"
+PINNED = ("Numbers are pinned by the operator's registry: keep every entry's number exactly as its branch "
+          "has it, never renumber, and when two sides give one number to different entries leave that "
+          "hunk's conflict markers in place.")
+VERIFY = ["git", "rev-parse", "-q", "--verify", "MERGE_HEAD"]
+HEAD = ["git", "rev-parse", "HEAD"]
+RESET_PRE = ["git", "reset", "--hard", "aaa"]
+CLEAN = ["git", "clean", "-fd"]
 
 
 def _completed(returncode=0, stdout="", stderr=""):
@@ -20,15 +30,28 @@ def _completed(returncode=0, stdout="", stderr=""):
 class FakeGit:
     """Answers the git commands merge_source_into_current issues."""
 
-    def __init__(self, merge_rc=0, conflicted=(), staged_rc=1):
+    def __init__(self, merge_rc=0, conflicted=(), staged_rc=1, merge_head_kept=False,
+                 head_moved=False, head_stays_moved=False):
         self.merge_rc = merge_rc
         self.conflicted = list(conflicted)
         self.staged_rc = staged_rc
+        self.merge_head_kept = merge_head_kept
+        self.head_moved = head_moved
+        self.head_stays_moved = head_stays_moved
+        self.head_reads = 0
         self.calls = []
 
     def __call__(self, cmd, cwd, check=True):
         self.calls.append(cmd)
-        if cmd[:2] == ["git", "merge"] and "--abort" not in cmd:
+        if cmd == VERIFY:
+            return _completed(0 if self.merge_head_kept else 1)
+        if cmd == RESET_PRE and not self.head_stays_moved:
+            self.head_moved = False
+        if cmd == HEAD:
+            self.head_reads += 1
+            moved = self.head_moved and self.head_reads > 1
+            return _completed(stdout="bbb\n" if moved else "aaa\n")
+        if cmd[:2] == ["git", "merge"]:
             return _completed(self.merge_rc)
         if cmd[:3] == ["git", "diff", "--name-only"]:
             return _completed(stdout="\n".join(self.conflicted))
@@ -37,11 +60,15 @@ class FakeGit:
         return _completed()
 
 
+def _without_head_reads(calls):
+    return [c for c in calls if c != HEAD]
+
+
 def test_up_to_date_when_nothing_staged():
     git = FakeGit(merge_rc=0, staged_rc=0)
     with patch.object(merge, "_run", git):
         assert merge_source_into_current("/w", "r/b", "b", "develop", resolver=MagicMock()) == UP_TO_DATE
-    assert git.calls[0] == ["git", "merge", "--no-commit", "--no-ff", "r/b"]
+    assert _without_head_reads(git.calls)[0] == ["git", "merge", "--no-commit", "--no-ff", "r/b"]
 
 
 def test_merged_when_clean_and_staged():
@@ -66,14 +93,34 @@ def test_ai_resolved_when_resolver_succeeds():
     with patch.object(merge, "_run", git):
         assert merge_source_into_current("/w", "r/b", "b", "develop", resolver=resolver) == AI_RESOLVED
     resolver.assert_called_once_with("/w", "b", "develop")
-    assert ["git", "merge", "--abort"] not in git.calls
+    assert RESET_PRE not in git.calls
 
 
 def test_conflict_aborts_when_resolver_fails():
     git = FakeGit(merge_rc=1, conflicted=["src/a.cpp"])
     with patch.object(merge, "_run", git):
         assert merge_source_into_current("/w", "r/b", "b", "develop", resolver=MagicMock(return_value=False)) == CONFLICT
-    assert git.calls[-1] == ["git", "merge", "--abort"]
+    assert _without_head_reads(git.calls)[-3:] == [RESET_PRE, CLEAN, VERIFY]
+
+
+def test_conflict_resets_a_merge_the_resolver_committed():
+    git = FakeGit(merge_rc=1, conflicted=["src/a.cpp"], head_moved=True)
+    with patch.object(merge, "_run", git):
+        assert merge_source_into_current("/w", "r/b", "b", "develop", resolver=MagicMock(return_value=False)) == CONFLICT
+    assert RESET_PRE in git.calls
+
+
+def test_raises_when_head_stays_off_the_pre_merge_commit():
+    git = FakeGit(merge_rc=1, conflicted=["src/a.cpp"], head_moved=True, head_stays_moved=True)
+    with patch.object(merge, "_run", git), pytest.raises(ComposeError, match="pre-merge"):
+        merge_source_into_current("/w", "r/b", "b", "develop", resolver=MagicMock(return_value=False))
+
+
+def test_raises_when_merge_head_survives_the_abort():
+    git = FakeGit(merge_rc=1, conflicted=["src/a.cpp"], merge_head_kept=True)
+    with patch.object(merge, "_run", git), pytest.raises(ComposeError, match="MERGE_HEAD"):
+        merge_source_into_current("/w", "r/b", "b", "develop", resolver=MagicMock(return_value=False))
+    assert _without_head_reads(git.calls)[-3:] == [RESET_PRE, CLEAN, VERIFY]
 
 
 def test_files_with_conflict_markers(tmp_path):
@@ -90,6 +137,13 @@ def test_merge_prompt_names_files_and_carries_guide():
     assert "a.cpp\nb.h" in prompt
     assert "XRPLF/rippled@x" in prompt
     assert "registry-number collisions" in prompt
+
+
+def test_merge_prompt_pinned_appends_the_pinned_paragraph():
+    guide = XRPLD_GUIDE.read_text()
+    prompt = merge_prompt(["a.cpp"], "XRPLF/rippled@x", "XRPLF/rippled@develop", guide=guide, pinned=True)
+    assert prompt.endswith("\n\n" + PINNED)
+    assert PINNED not in merge_prompt(["a.cpp"], "XRPLF/rippled@x", "XRPLF/rippled@develop", guide=guide)
 
 
 def test_merge_prompt_without_guide_is_the_task_alone():
@@ -124,6 +178,24 @@ def test_ai_resolve_invokes_claude_with_budget_and_timeout(mock_which, tmp_path)
 
 
 @patch("multibranch_builder.merge.shutil.which", return_value="/usr/bin/claude")
+def test_ai_resolve_forwards_pinned_to_the_prompt(mock_which, tmp_path):
+    (tmp_path / "a.cpp").write_text("resolved\n")
+    state = {"conflicted": ["a.cpp"]}
+
+    def fake_run(cmd, cwd, check=True):
+        if cmd[:3] == ["git", "diff", "--name-only"]:
+            return _completed(stdout="\n".join(state["conflicted"]))
+        if cmd[:2] == ["git", "add"]:
+            state["conflicted"] = []
+        return _completed()
+
+    with patch.object(merge, "_run", fake_run), patch("multibranch_builder.merge.subprocess.run") as claude:
+        claude.return_value = _completed()
+        assert ai_resolve(str(tmp_path), "b", "develop", guide_path=XRPLD_GUIDE, pinned=True) is True
+    assert claude.call_args.args[0][2].endswith(PINNED)
+
+
+@patch("multibranch_builder.merge.shutil.which", return_value="/usr/bin/claude")
 def test_ai_resolve_false_on_timeout(mock_which, tmp_path):
     with patch.object(merge, "_run", lambda cmd, cwd, check=True: _completed(stdout="a.cpp")), \
          patch("multibranch_builder.merge.subprocess.run", side_effect=subprocess.TimeoutExpired("claude", 1)):
@@ -149,3 +221,63 @@ def test_ai_resolve_false_without_claude_cli(mock_which):
 def test_ai_resolve_true_when_nothing_conflicted():
     with patch.object(merge, "_run", lambda cmd, cwd, check=True: _completed(stdout="")):
         assert ai_resolve("/w", "b", "develop") is True
+
+
+def _real_git(repo: Path, *args: str) -> str:
+    return subprocess.run(["git", "-C", str(repo), *args], check=True, text=True, capture_output=True).stdout.strip()
+
+
+def _conflicting_repo(tmp_path: Path) -> Path:
+    repo = tmp_path / "repo"
+    _real_git(tmp_path, "init", "-q", "-b", "main", str(repo))
+    _real_git(repo, "config", "user.email", "t@t")
+    _real_git(repo, "config", "user.name", "t")
+    _real_git(repo, "config", "commit.gpgsign", "false")
+    (repo / "f.txt").write_text("base\n")
+    _real_git(repo, "add", "f.txt")
+    _real_git(repo, "commit", "-q", "-m", "base")
+    _real_git(repo, "checkout", "-q", "-b", "incoming")
+    (repo / "f.txt").write_text("theirs\n")
+    _real_git(repo, "commit", "-q", "-am", "theirs")
+    _real_git(repo, "checkout", "-q", "main")
+    (repo / "f.txt").write_text("ours\n")
+    _real_git(repo, "commit", "-q", "-am", "ours")
+    return repo
+
+
+def test_real_git_conflict_restores_the_pre_merge_commit_when_the_resolver_committed(tmp_path):
+    repo = _conflicting_repo(tmp_path)
+    pre_merge = _real_git(repo, "rev-parse", "HEAD")
+
+    def committing_resolver(cwd, source_label, base_label):
+        (repo / "f.txt").write_text("resolved\n")
+        _real_git(repo, "commit", "-q", "-am", "resolver committed the merge")
+        return False
+
+    assert merge_source_into_current(str(repo), "incoming", "incoming", "main", resolver=committing_resolver) == CONFLICT
+    assert _real_git(repo, "rev-parse", "HEAD") == pre_merge
+    assert _real_git(repo, "status", "--porcelain") == ""
+
+
+def test_real_git_conflict_leaves_the_pre_merge_commit_on_a_plain_abort(tmp_path):
+    repo = _conflicting_repo(tmp_path)
+    pre_merge = _real_git(repo, "rev-parse", "HEAD")
+    assert merge_source_into_current(str(repo), "incoming", "incoming", "main",
+                                     resolver=MagicMock(return_value=False)) == CONFLICT
+    assert _real_git(repo, "rev-parse", "HEAD") == pre_merge
+    assert _real_git(repo, "status", "--porcelain") == ""
+
+
+def test_real_git_conflict_removes_files_the_resolver_left_untracked(tmp_path):
+    repo = _conflicting_repo(tmp_path)
+    pre_merge = _real_git(repo, "rev-parse", "HEAD")
+
+    def littering_resolver(cwd, source_label, base_label):
+        (repo / "scratch-note.txt").write_text("notes\n")
+        (repo / "notes").mkdir()
+        (repo / "notes" / "a.txt").write_text("a\n")
+        return False
+
+    assert merge_source_into_current(str(repo), "incoming", "incoming", "main", resolver=littering_resolver) == CONFLICT
+    assert _real_git(repo, "rev-parse", "HEAD") == pre_merge
+    assert _real_git(repo, "status", "--porcelain", "--untracked-files=all") == ""

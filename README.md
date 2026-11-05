@@ -39,7 +39,7 @@ is a package under
 
 | kind | tree_dir | default branch | options | settings | prepare | build |
 |---|---|---|---|---|---|---|
-| `xrpld` | `rippled` | `develop` | `force_supported` ON\|OFF, `datagram`, `version`, `symbols` ON\|OFF | none | none | Cloud Build with the dockerfiles under `targets/xrpld/cloudbuild/` |
+| `xrpld` | `rippled` | `develop` | `force_supported` ON\|OFF, `datagram`, `version`, `symbols` ON\|OFF, `renumber` ON\|OFF, `ai_budget_usd` | none | none | Cloud Build with the dockerfiles under `targets/xrpld/cloudbuild/` |
 | `xrpl_js` | `xrpl.js` | `main` | none | `definitions` (required) | writes the node's `server_definitions` over `packages/ripple-binary-codec/src/enums/definitions.json` and regenerates `package-lock.json` | checks the tree is clean and its definitions load, then `npm ci`, `npm run build`, `npm test` into `npm-build.log` |
 
 The xrpl_js kind takes `definitions <json-rpc url>` from the conf and calls `server_definitions`
@@ -58,7 +58,7 @@ outcomes recorded per branch in the manifest:
 |---|---|
 | `up-to-date` | the branch is already contained in the tree; nothing staged |
 | `merged` | clean merge |
-| `ai-resolved` | conflicts were finished by `git rerere`, by a kind's merge driver, or by `claude -p` |
+| `ai-resolved` | conflicts were finished by `git rerere` or by `claude -p` (a file a merge driver resolves leaves the outcome `merged`) |
 | `conflict` | nothing could resolve it; the merge is aborted and the tree left clean |
 
 Two mechanisms run before claude sees a conflict:
@@ -66,12 +66,14 @@ Two mechanisms run before claude sees a conflict:
 - The kind's merge drivers, registered repo-locally (`.git/info/attributes`, never committed).
   For xrpld, `multibranch_builder/targets/xrpld/registry_merge.py` handles `features.macro`,
   `ledger_entries.macro`, `transactions.macro`, `sfields.macro` and `jss.h`: it unions
-  independent entries and renumbers an incoming entry whose numeric id collides. Anything it
-  cannot prove safe stays a normal conflict.
+  independent entries and renumbers an incoming entry whose numeric id collides (with `renumber=OFF`
+  it renumbers nothing and leaves a collision in conflict). Anything it cannot prove safe falls back
+  to `git merge-file`: a clean textual merge resolves the file, otherwise it carries standard
+  conflict markers that rerere can record.
 - `git rerere` with `rerere.autoUpdate` replays resolutions recorded earlier in the same clone.
 
 What remains goes to the local `claude` CLI: `claude -p <prompt> --permission-mode
-bypassPermissions --allowedTools Read,Edit,Bash,Glob,Grep --add-dir <tree> --max-budget-usd 5`
+bypassPermissions --allowedTools Read,Edit,Bash,Glob,Grep --add-dir <tree> --max-budget-usd <ai_budget_usd, default 5>`
 under a one-hour subprocess timeout. The prompt lists the conflicted files and appends the
 kind's guide (`multibranch_builder/targets/xrpld/merge.md` for xrpld: registry-number
 collisions, namespace and file-move rules, the per-file strategy). After claude returns, files
@@ -114,7 +116,13 @@ multibranch-builder compose  (--conf FILE | --src URL [--features URL...]) --wor
   and debug info (no `strip -s`; Release builds already carry `-g`) for profiling, and the image
   tag gets `-sym` so it never replaces the stripped image. Without `version`, a composed
   build reports the version cmake derives from the composed commit, which the build passes in
-  place of the `.git` it does not upload.
+  place of the `.git` it does not upload. `renumber=OFF` (default ON) pins every registry
+  number: the registry merge driver runs with `--no-renumber` and gives a number collision to
+  the textual merge, and the resolver prompt tells claude to keep every number and leave a
+  collision's conflict markers in place. Whenever the structured merge cannot prove a result
+  safe, the driver runs `git merge-file`: a clean textual merge resolves the file, otherwise the
+  standard conflict markers stay for rerere and the resolver. `ai_budget_usd=<number>` (default
+  5) is the resolver's `--max-budget-usd` for each conflicted merge.
 - `--dry-run` prints the plan (kind, base, ordered branches, target, settings, options) and
   exits 0 without cloning.
 - URLs are github `tree`, `commit` or repo URLs; `owner/repo@branch` is also accepted. A bare
