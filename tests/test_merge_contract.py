@@ -21,8 +21,7 @@ ABORT = ["git", "merge", "--abort"]
 RESET = ["git", "reset", "--hard", "HEAD"]
 VERIFY = ["git", "rev-parse", "-q", "--verify", "MERGE_HEAD"]
 HEAD = ["git", "rev-parse", "HEAD"]
-ORIG = ["git", "rev-parse", "ORIG_HEAD"]
-RESET_ORIG = ["git", "reset", "--hard", "ORIG_HEAD"]
+RESET_PRE = ["git", "reset", "--hard", "aaa"]
 
 
 def _completed(returncode=0, stdout="", stderr=""):
@@ -41,6 +40,7 @@ class FakeGit:
         self.merge_head_kept = merge_head_kept
         self.head_moved = head_moved
         self.head_stays_moved = head_stays_moved
+        self.head_reads = 0
         self.calls = []
 
     def __call__(self, cmd, cwd, check=True):
@@ -49,12 +49,12 @@ class FakeGit:
             return _completed(self.abort_rc)
         if cmd == VERIFY:
             return _completed(0 if self.merge_head_kept else 1)
-        if cmd == RESET_ORIG and not self.head_stays_moved:
+        if cmd == RESET_PRE and not self.head_stays_moved:
             self.head_moved = False
         if cmd == HEAD:
-            return _completed(stdout="bbb\n" if self.head_moved else "aaa\n")
-        if cmd == ORIG:
-            return _completed(stdout="aaa\n")
+            self.head_reads += 1
+            moved = self.head_moved and self.head_reads > 1
+            return _completed(stdout="bbb\n" if moved else "aaa\n")
         if cmd[:2] == ["git", "merge"]:
             return _completed(self.merge_rc)
         if cmd[:3] == ["git", "diff", "--name-only"]:
@@ -65,14 +65,14 @@ class FakeGit:
 
 
 def _without_head_reads(calls):
-    return [c for c in calls if c not in (HEAD, ORIG)]
+    return [c for c in calls if c != HEAD]
 
 
 def test_up_to_date_when_nothing_staged():
     git = FakeGit(merge_rc=0, staged_rc=0)
     with patch.object(merge, "_run", git):
         assert merge_source_into_current("/w", "r/b", "b", "develop", resolver=MagicMock()) == UP_TO_DATE
-    assert git.calls[0] == ["git", "merge", "--no-commit", "--no-ff", "r/b"]
+    assert _without_head_reads(git.calls)[0] == ["git", "merge", "--no-commit", "--no-ff", "r/b"]
 
 
 def test_merged_when_clean_and_staged():
@@ -119,7 +119,7 @@ def test_conflict_resets_a_merge_the_resolver_committed():
     git = FakeGit(merge_rc=1, conflicted=["src/a.cpp"], head_moved=True)
     with patch.object(merge, "_run", git):
         assert merge_source_into_current("/w", "r/b", "b", "develop", resolver=MagicMock(return_value=False)) == CONFLICT
-    assert RESET_ORIG in git.calls
+    assert RESET_PRE in git.calls
 
 
 def test_raises_when_head_stays_off_the_pre_merge_commit():
