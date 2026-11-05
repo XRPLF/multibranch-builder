@@ -44,7 +44,7 @@ class XrplJsKind:
         if not url.startswith(("http://", "https://")):
             raise ConfError(f"definitions must be an http(s) URL, got {url!r}")
 
-    def configure_merge(self, tree: str) -> None:
+    def configure_merge(self, tree: str, options: dict[str, str]) -> None:
         _git(tree, "config", "merge.ours.name", "keep the base tree's version")
         _git(tree, "config", "merge.ours.driver", "true")
         enable_rerere(tree)

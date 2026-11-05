@@ -12,7 +12,9 @@ from pathlib import Path
 
 from .conf import Config
 from .errors import ComposeError
-from .merge import AI_RESOLVED, CONFLICT, MERGED, Resolver, ai_resolve, merge_source_into_current
+from .merge import (
+    AI_RESOLVED, CLAUDE_BUDGET_USD, CONFLICT, MERGED, Resolver, ai_resolve, merge_source_into_current,
+)
 from .targets.base import Kind
 
 MANIFEST_FILE = "manifest.json"
@@ -124,7 +126,10 @@ def compose(config: Config, workdir: str | Path, *, kind: Kind, options: dict[st
     is written as `prepared.error` with an empty `composed_sha` and raised the same way.
     """
     base = config.base
-    resolver = resolver or functools.partial(ai_resolve, guide_path=kind.merge_guide)
+    resolver = resolver or functools.partial(
+        ai_resolve, guide_path=kind.merge_guide,
+        budget_usd=float(options.get("ai_budget_usd", CLAUDE_BUDGET_USD)),
+        pinned=options.get("renumber") == "OFF")
     workdir = Path(workdir).resolve()
     workdir.mkdir(parents=True, exist_ok=True)
     src = str(workdir / kind.tree_dir)
@@ -141,7 +146,7 @@ def compose(config: Config, workdir: str | Path, *, kind: Kind, options: dict[st
         raise ComposeError(f"checkout of {base.branch} failed:\n{checkout.stderr.strip()}")
     _run(["git", "config", "user.name", os.environ.get("GIT_BOT_NAME") or DEFAULT_GIT_NAME], cwd=src)
     _run(["git", "config", "user.email", os.environ.get("GIT_BOT_EMAIL") or DEFAULT_GIT_EMAIL], cwd=src)
-    kind.configure_merge(src)
+    kind.configure_merge(src, options)
     base_sha = _run(["git", "rev-parse", "HEAD"], cwd=src).stdout.strip()
 
     manifest = Manifest(

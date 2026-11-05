@@ -4,22 +4,25 @@ features.macro, ledger_entries.macro, transactions.macro, sfields.macro and
 jss.h are registries of independent `MACRO(...)` entries. Textual merges
 conflict whenever two branches append in the same region, but the domain
 resolution is mechanical: union the entries, keep ours where both sides agree
-with base, and renumber an incoming entry whose numeric id collides.
+with base, and renumber an incoming entry whose numeric id collides (unless
+`--no-renumber` pins every number, when a collision is left to the textual merge).
 
 Registered as a repo-local merge driver (see `configure_repo`) so it fires
 inside `git merge` for exactly these files, in the integration workspace only —
 PR branches are never rewritten. Anything the structured merge cannot prove
-safe (both sides modified one entry, parse failure, leftover duplicate) exits
-non-zero, which leaves the normal conflict for the doctor agent.
+safe (both sides modified one entry, parse failure, leftover duplicate) falls
+back to `git merge-file %A %O %B`: a clean textual merge exits 0, otherwise %A
+keeps standard conflict markers for rerere and the doctor agent.
 
 Stdlib-only: git invokes this file directly as a script with
-    python3 registry_merge.py %O %A %B %P
+    python3 registry_merge.py [--no-renumber] %O %A %B %P
 (the merged result must be written to %A; exit 0 means resolved).
 """
 from __future__ import annotations
 
 import os
 import re
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -222,9 +225,10 @@ def _renumber(entry: Entry, num_idx: int, old_raw: str, new_value: int) -> Entry
 
 
 def merge3(base_text: str, ours_text: str, theirs_text: str, filename: str,
-           tree: Optional[Path] = None) -> Optional[str]:
+           tree: Optional[Path] = None, renumber: bool = True) -> Optional[str]:
     """Structured 3-way merge. Returns merged text, or None if not provably safe.
-    `tree` is the repository root, used to find transactor headers for include blocks."""
+    `tree` is the repository root, used to find transactor headers for include blocks.
+    With `renumber` False an incoming entry whose number collides returns None."""
     tree = tree or Path(os.getcwd())
     base_c, ours_c, theirs_c = parse(base_text), parse(ours_text), parse(theirs_text)
     if base_c is None or ours_c is None or theirs_c is None:
@@ -281,6 +285,8 @@ def merge3(base_text: str, ours_text: str, theirs_text: str, filename: str,
                 return None
             scope, value, raw = info
             if value in used.get(scope, set()):
+                if not renumber:
+                    return None
                 new_value = maxima.get(scope, value) + 1
                 entry = _renumber(entry, num_idx, raw, new_value)
                 shown = f"0x{new_value:04X}" if raw.lower().startswith("0x") else str(new_value)
@@ -336,10 +342,14 @@ def _validate(text: str, filename: str) -> bool:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 5:
-        print("usage: registry_merge.py <base> <ours> <theirs> <pathname>", file=sys.stderr)
+    args = argv[1:]
+    renumber = not (args and args[0] == "--no-renumber")
+    if not renumber:
+        args = args[1:]
+    if len(args) != 4:
+        print("usage: registry_merge.py [--no-renumber] <base> <ours> <theirs> <pathname>", file=sys.stderr)
         return 1
-    base_path, ours_path, theirs_path, pathname = argv[1:5]
+    base_path, ours_path, theirs_path, pathname = args
     filename = pathname.rsplit("/", 1)[-1]
     if filename not in _HANDLED:
         return 1
@@ -349,11 +359,14 @@ def main(argv: list[str]) -> int:
         ours_text = f.read()
     with open(theirs_path) as f:
         theirs_text = f.read()
-    merged = merge3(base_text, ours_text, theirs_text, filename)
+    merged = merge3(base_text, ours_text, theirs_text, filename, renumber=renumber)
     if merged is None:
-        print(f"registry-merge: {pathname}: structured merge not provably safe — "
-              f"leaving conflict for manual/doctor resolution", file=sys.stderr)
-        return 1
+        # Textual 3-way merge into %A: exit 0 when clean, else conflict markers rerere can record.
+        textual = subprocess.run(["git", "merge-file", ours_path, base_path, theirs_path])
+        outcome = "merged textually" if textual.returncode == 0 else "left with conflict markers"
+        print(f"registry-merge: {pathname}: structured merge not provably safe — {outcome}",
+              file=sys.stderr)
+        return textual.returncode
     with open(ours_path, "w") as f:
         f.write(merged)
     print(f"registry-merge: {pathname}: resolved structurally", file=sys.stderr)

@@ -198,22 +198,22 @@ def test_ours_driver_keeps_the_trees_definitions_when_both_sides_changed(repo):
     (repo / DEFS).write_text("ours\n")
     (repo / "other.ts").write_text("ours\n")
     git(repo, "commit", "-q", "-am", "main moves")
-    KIND.configure_merge(str(repo))
+    KIND.configure_merge(str(repo), {})
     subprocess.run(["git", "merge", "--no-commit", "--no-ff", "feat"], cwd=repo, capture_output=True)
     assert (repo / DEFS).read_text() == "ours\n"
     assert git(repo, "diff", "--name-only", "--diff-filter=U") == "other.ts"
 
 
 def test_ours_driver_does_not_run_when_only_the_branch_changed_definitions(repo):
-    KIND.configure_merge(str(repo))
+    KIND.configure_merge(str(repo), {})
     subprocess.run(["git", "merge", "--no-commit", "--no-ff", "feat"], cwd=repo, capture_output=True)
     assert (repo / DEFS).read_text() == "theirs\n"
 
 
 def test_configure_merge_writes_both_attributes_once(tmp_path):
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
-    KIND.configure_merge(str(tmp_path))
-    KIND.configure_merge(str(tmp_path))
+    KIND.configure_merge(str(tmp_path), {})
+    KIND.configure_merge(str(tmp_path), {})
     attributes = (tmp_path / ".git" / "info" / "attributes").read_text()
     assert attributes.count("merge=ours") == 2
     assert git(tmp_path, "config", "merge.ours.driver") == "true"

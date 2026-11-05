@@ -10,6 +10,8 @@ import sys
 from pathlib import Path
 from typing import Callable
 
+from .errors import ComposeError
+
 CLAUDE_TOOLS = "Read,Edit,Bash,Glob,Grep"
 CLAUDE_BUDGET_USD = 5.0
 CLAUDE_TIMEOUT_S = 3600
@@ -23,6 +25,12 @@ OUTCOMES = (UP_TO_DATE, MERGED, AI_RESOLVED, CONFLICT)
 Resolver = Callable[[str, str, str], bool]
 
 _CONFLICT_MARKER_RE = re.compile(r"^(<{7} |={7}$|>{7} )", re.MULTILINE)
+
+PINNED_NUMBERS = (
+    "Numbers are pinned by the operator's registry: keep every entry's number exactly as its branch "
+    "has it, never renumber, and when two sides give one number to different entries leave that "
+    "hunk's conflict markers in place."
+)
 
 
 def _run(cmd: list[str], cwd: str, check: bool = True) -> subprocess.CompletedProcess:
@@ -72,8 +80,10 @@ def files_with_conflict_markers(cwd: str, files: list[str]) -> list[str]:
     return remaining
 
 
-def merge_prompt(files: list[str], source_label: str, base_label: str, guide: str | None = None) -> str:
-    """The claude prompt: the task, the conflicted files, then the kind's merge guide when given."""
+def merge_prompt(files: list[str], source_label: str, base_label: str, guide: str | None = None,
+                 pinned: bool = False) -> str:
+    """The claude prompt: the task, the conflicted files, the kind's merge guide when given, then
+    the pinned-numbers paragraph when `pinned`."""
     task = (
         "This repository has an in-progress git merge with conflicts. This merge layers "
         f"'{source_label}' on top of the already-composed tree based on '{base_label}' — KEEP "
@@ -83,11 +93,13 @@ def merge_prompt(files: list[str], source_label: str, base_label: str, guide: st
         "--check` reports nothing. Do NOT git commit and do NOT git merge --abort.\n\n"
         "Conflicted files:\n" + "\n".join(files)
     )
-    return task + ("\n\n---\n\n" + guide if guide else "")
+    prompt = task + ("\n\n---\n\n" + guide if guide else "")
+    return prompt + ("\n\n" + PINNED_NUMBERS if pinned else "")
 
 
 def ai_resolve(cwd: str, source_label: str, base_label: str, *, guide_path: Path | None = None,
-               budget_usd: float = CLAUDE_BUDGET_USD, timeout_s: int = CLAUDE_TIMEOUT_S) -> bool:
+               budget_usd: float = CLAUDE_BUDGET_USD, timeout_s: int = CLAUDE_TIMEOUT_S,
+               pinned: bool = False) -> bool:
     """Run `claude -p` on the conflicted files; True when none remain unmerged or marked."""
     files = conflicted_files(cwd)
     if not files:
@@ -99,7 +111,7 @@ def ai_resolve(cwd: str, source_label: str, base_label: str, *, guide_path: Path
     _log(f"AI-resolving {len(files)} conflicted file(s) from {source_label} via claude")
     try:
         subprocess.run(
-            ["claude", "-p", merge_prompt(files, source_label, base_label, guide),
+            ["claude", "-p", merge_prompt(files, source_label, base_label, guide, pinned),
              "--permission-mode", "bypassPermissions",
              "--allowedTools", CLAUDE_TOOLS,
              "--add-dir", cwd,
@@ -128,6 +140,7 @@ def merge_source_into_current(repo_dir: str, source_ref: str, branch_label: str,
 
     Returns one of OUTCOMES: `up-to-date` (nothing staged), `merged` (clean), `ai-resolved`
     (rerere, the registry driver or the resolver finished it), or `conflict` (aborted, tree clean).
+    Raises ComposeError when MERGE_HEAD survives both `git merge --abort` and `git reset --hard`.
     """
     merge = _run(["git", "merge", "--no-commit", "--no-ff", source_ref], cwd=repo_dir, check=False)
     conflicted = conflicted_files(repo_dir)
@@ -141,5 +154,10 @@ def merge_source_into_current(repo_dir: str, source_ref: str, branch_label: str,
         return AI_RESOLVED
     if resolver(repo_dir, branch_label, base_label):
         return AI_RESOLVED
-    _run(["git", "merge", "--abort"], cwd=repo_dir, check=False)
+    abort = _run(["git", "merge", "--abort"], cwd=repo_dir, check=False)
+    if abort.returncode != 0:
+        _log(f"{branch_label}: git merge --abort failed, resetting: {abort.stderr.strip()}")
+        _run(["git", "reset", "--hard", "HEAD"], cwd=repo_dir, check=False)
+    if _run(["git", "rev-parse", "-q", "--verify", "MERGE_HEAD"], cwd=repo_dir, check=False).returncode == 0:
+        raise ComposeError(f"{branch_label}: the merge could not be aborted; MERGE_HEAD remains in {repo_dir}")
     return CONFLICT

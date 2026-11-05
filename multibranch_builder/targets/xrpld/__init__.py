@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 import shlex
 import subprocess
@@ -28,6 +29,17 @@ _REGISTRY_ATTRIBUTES = (
 )
 
 
+def _positive_number(value: str) -> str:
+    """`value` when it parses as a finite number above zero; ConfError otherwise."""
+    try:
+        number = float(value)
+    except ValueError:
+        number = math.nan
+    if not (math.isfinite(number) and number > 0):
+        raise ConfError(f"ai_budget_usd must be a positive number, got {value!r}")
+    return value
+
+
 def _git_config(tree: str, key: str, value: str) -> None:
     subprocess.run(["git", "config", key, value], cwd=tree, check=False, capture_output=True)
 
@@ -46,6 +58,10 @@ class XrpldKind:
                    "(default: the tree's own)",
         "symbols": "ON|OFF: keep the symbol table and debug info instead of stripping xrpld and "
                    "validator-keys, for profiling; the image tag gets -sym (default OFF)",
+        "renumber": "ON|OFF: OFF pins every registry number; the registry merge driver never renumbers "
+                    "and leaves a number collision to the textual merge and the resolver (default ON)",
+        "ai_budget_usd": "positive number: the claude resolver's --max-budget-usd per conflicted merge "
+                         "(default 5)",
     }
     settings: dict[str, str] = {}
 
@@ -64,15 +80,22 @@ class XrpldKind:
             if not _SEMVER.fullmatch(options["version"]):
                 raise ConfError(f"version must be a semantic version xrpld accepts, got {options['version']!r}")
             out["version"] = options["version"]
+        if "renumber" in options:
+            if options["renumber"] not in ("ON", "OFF"):
+                raise ConfError(f"renumber must be ON or OFF, got {options['renumber']!r}")
+            out["renumber"] = options["renumber"]
+        if "ai_budget_usd" in options:
+            out["ai_budget_usd"] = _positive_number(options["ai_budget_usd"])
         return out
 
     def validate_settings(self, settings: dict[str, str]) -> None:
         check_keys(settings, self.settings, "setting", self.name)
 
-    def configure_merge(self, tree: str) -> None:
+    def configure_merge(self, tree: str, options: dict[str, str]) -> None:
+        pin = " --no-renumber" if options.get("renumber") == "OFF" else ""
         _git_config(tree, "merge.xrplregistry.name", "xrpld registry union merge")
         _git_config(tree, "merge.xrplregistry.driver",
-                    f"{shlex.quote(sys.executable)} {shlex.quote(str(_DRIVER))} %O %A %B %P")
+                    f"{shlex.quote(sys.executable)} {shlex.quote(str(_DRIVER))}{pin} %O %A %B %P")
         enable_rerere(tree)
         write_attributes(tree, _REGISTRY_ATTRIBUTES)
 

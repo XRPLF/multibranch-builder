@@ -101,6 +101,18 @@ verbatim loses it). After resolving, diff each entry's field set: for every `LED
 `TRANSACTION` the branch touched, confirm every `sf*` the branch had is still present in the
 merged entry. A dropped field passes the build but throws `Template field error` at runtime.
 
+### When numbers are pinned
+
+When the prompt says numbers are pinned by the operator's registry (the compose ran with
+`renumber=OFF`), this section replaces rule 2 and every "next available number" instruction below,
+the checklist's included:
+- Keep every branch's new entries with exactly the number, hex type or namespace character its
+  branch gives them. Never renumber, never pick a next free slot.
+- The registry table assigned those numbers before the compose, so a collision is an error in the
+  table or a branch, not something this merge resolves: when two sides give one number to
+  different entries, leave that hunk's conflict markers in place and do not edit it.
+- Rules 1, 3 and 4 still apply.
+
 ## File-Specific Resolution Rules
 
 ### `include/xrpl/protocol/detail/features.macro`
