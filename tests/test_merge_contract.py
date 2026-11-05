@@ -233,3 +233,48 @@ def test_ai_resolve_false_without_claude_cli(mock_which):
 def test_ai_resolve_true_when_nothing_conflicted():
     with patch.object(merge, "_run", lambda cmd, cwd, check=True: _completed(stdout="")):
         assert ai_resolve("/w", "b", "develop") is True
+
+
+def _real_git(repo: Path, *args: str) -> str:
+    return subprocess.run(["git", "-C", str(repo), *args], check=True, text=True, capture_output=True).stdout.strip()
+
+
+def _conflicting_repo(tmp_path: Path) -> Path:
+    repo = tmp_path / "repo"
+    _real_git(tmp_path, "init", "-q", "-b", "main", str(repo))
+    _real_git(repo, "config", "user.email", "t@t")
+    _real_git(repo, "config", "user.name", "t")
+    _real_git(repo, "config", "commit.gpgsign", "false")
+    (repo / "f.txt").write_text("base\n")
+    _real_git(repo, "add", "f.txt")
+    _real_git(repo, "commit", "-q", "-m", "base")
+    _real_git(repo, "checkout", "-q", "-b", "incoming")
+    (repo / "f.txt").write_text("theirs\n")
+    _real_git(repo, "commit", "-q", "-am", "theirs")
+    _real_git(repo, "checkout", "-q", "main")
+    (repo / "f.txt").write_text("ours\n")
+    _real_git(repo, "commit", "-q", "-am", "ours")
+    return repo
+
+
+def test_real_git_conflict_restores_the_pre_merge_commit_when_the_resolver_committed(tmp_path):
+    repo = _conflicting_repo(tmp_path)
+    pre_merge = _real_git(repo, "rev-parse", "HEAD")
+
+    def committing_resolver(cwd, source_label, base_label):
+        (repo / "f.txt").write_text("resolved\n")
+        _real_git(repo, "commit", "-q", "-am", "resolver committed the merge")
+        return False
+
+    assert merge_source_into_current(str(repo), "incoming", "incoming", "main", resolver=committing_resolver) == CONFLICT
+    assert _real_git(repo, "rev-parse", "HEAD") == pre_merge
+    assert _real_git(repo, "status", "--porcelain") == ""
+
+
+def test_real_git_conflict_leaves_the_pre_merge_commit_on_a_plain_abort(tmp_path):
+    repo = _conflicting_repo(tmp_path)
+    pre_merge = _real_git(repo, "rev-parse", "HEAD")
+    assert merge_source_into_current(str(repo), "incoming", "incoming", "main",
+                                     resolver=MagicMock(return_value=False)) == CONFLICT
+    assert _real_git(repo, "rev-parse", "HEAD") == pre_merge
+    assert _real_git(repo, "status", "--porcelain") == ""
