@@ -17,11 +17,10 @@ XRPLD_GUIDE = Path(merge.__file__).parent / "targets" / "xrpld" / "merge.md"
 PINNED = ("Numbers are pinned by the operator's registry: keep every entry's number exactly as its branch "
           "has it, never renumber, and when two sides give one number to different entries leave that "
           "hunk's conflict markers in place.")
-ABORT = ["git", "merge", "--abort"]
-RESET = ["git", "reset", "--hard", "HEAD"]
 VERIFY = ["git", "rev-parse", "-q", "--verify", "MERGE_HEAD"]
 HEAD = ["git", "rev-parse", "HEAD"]
 RESET_PRE = ["git", "reset", "--hard", "aaa"]
+CLEAN = ["git", "clean", "-fd"]
 
 
 def _completed(returncode=0, stdout="", stderr=""):
@@ -31,12 +30,11 @@ def _completed(returncode=0, stdout="", stderr=""):
 class FakeGit:
     """Answers the git commands merge_source_into_current issues."""
 
-    def __init__(self, merge_rc=0, conflicted=(), staged_rc=1, abort_rc=0, merge_head_kept=False,
+    def __init__(self, merge_rc=0, conflicted=(), staged_rc=1, merge_head_kept=False,
                  head_moved=False, head_stays_moved=False):
         self.merge_rc = merge_rc
         self.conflicted = list(conflicted)
         self.staged_rc = staged_rc
-        self.abort_rc = abort_rc
         self.merge_head_kept = merge_head_kept
         self.head_moved = head_moved
         self.head_stays_moved = head_stays_moved
@@ -45,8 +43,6 @@ class FakeGit:
 
     def __call__(self, cmd, cwd, check=True):
         self.calls.append(cmd)
-        if cmd == ABORT:
-            return _completed(self.abort_rc)
         if cmd == VERIFY:
             return _completed(0 if self.merge_head_kept else 1)
         if cmd == RESET_PRE and not self.head_stays_moved:
@@ -97,22 +93,14 @@ def test_ai_resolved_when_resolver_succeeds():
     with patch.object(merge, "_run", git):
         assert merge_source_into_current("/w", "r/b", "b", "develop", resolver=resolver) == AI_RESOLVED
     resolver.assert_called_once_with("/w", "b", "develop")
-    assert ["git", "merge", "--abort"] not in git.calls
+    assert RESET_PRE not in git.calls
 
 
 def test_conflict_aborts_when_resolver_fails():
     git = FakeGit(merge_rc=1, conflicted=["src/a.cpp"])
     with patch.object(merge, "_run", git):
         assert merge_source_into_current("/w", "r/b", "b", "develop", resolver=MagicMock(return_value=False)) == CONFLICT
-    assert _without_head_reads(git.calls)[-2:] == [ABORT, VERIFY]
-    assert RESET not in git.calls
-
-
-def test_conflict_resets_when_abort_fails():
-    git = FakeGit(merge_rc=1, conflicted=["src/a.cpp"], abort_rc=128)
-    with patch.object(merge, "_run", git):
-        assert merge_source_into_current("/w", "r/b", "b", "develop", resolver=MagicMock(return_value=False)) == CONFLICT
-    assert _without_head_reads(git.calls)[-3:] == [ABORT, RESET, VERIFY]
+    assert _without_head_reads(git.calls)[-3:] == [RESET_PRE, CLEAN, VERIFY]
 
 
 def test_conflict_resets_a_merge_the_resolver_committed():
@@ -129,10 +117,10 @@ def test_raises_when_head_stays_off_the_pre_merge_commit():
 
 
 def test_raises_when_merge_head_survives_the_abort():
-    git = FakeGit(merge_rc=1, conflicted=["src/a.cpp"], abort_rc=128, merge_head_kept=True)
+    git = FakeGit(merge_rc=1, conflicted=["src/a.cpp"], merge_head_kept=True)
     with patch.object(merge, "_run", git), pytest.raises(ComposeError, match="MERGE_HEAD"):
         merge_source_into_current("/w", "r/b", "b", "develop", resolver=MagicMock(return_value=False))
-    assert _without_head_reads(git.calls)[-3:] == [ABORT, RESET, VERIFY]
+    assert _without_head_reads(git.calls)[-3:] == [RESET_PRE, CLEAN, VERIFY]
 
 
 def test_files_with_conflict_markers(tmp_path):
