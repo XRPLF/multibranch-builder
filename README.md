@@ -66,12 +66,14 @@ Two mechanisms run before claude sees a conflict:
 - The kind's merge drivers, registered repo-locally (`.git/info/attributes`, never committed).
   For xrpld, `multibranch_builder/targets/xrpld/registry_merge.py` handles `features.macro`,
   `ledger_entries.macro`, `transactions.macro`, `sfields.macro` and `jss.h`: it unions
-  independent entries and renumbers an incoming entry whose numeric id collides. Anything it
-  cannot prove safe stays a normal conflict.
+  independent entries and renumbers an incoming entry whose numeric id collides (with `renumber=OFF`
+  it renumbers nothing and leaves a collision in conflict). Anything it cannot prove safe falls back
+  to `git merge-file`: a clean textual merge resolves the file, otherwise it carries standard
+  conflict markers that rerere can record.
 - `git rerere` with `rerere.autoUpdate` replays resolutions recorded earlier in the same clone.
 
 What remains goes to the local `claude` CLI: `claude -p <prompt> --permission-mode
-bypassPermissions --allowedTools Read,Edit,Bash,Glob,Grep --add-dir <tree> --max-budget-usd 5`
+bypassPermissions --allowedTools Read,Edit,Bash,Glob,Grep --add-dir <tree> --max-budget-usd <ai_budget_usd, default 5>`
 under a one-hour subprocess timeout. The prompt lists the conflicted files and appends the
 kind's guide (`multibranch_builder/targets/xrpld/merge.md` for xrpld: registry-number
 collisions, namespace and file-move rules, the per-file strategy). After claude returns, files
