@@ -362,7 +362,9 @@ def main(argv: list[str]) -> int:
     merged = merge3(base_text, ours_text, theirs_text, filename, renumber=renumber)
     if merged is None:
         # Textual 3-way merge into %A: exit 0 when clean, else conflict markers rerere can record.
-        textual = subprocess.run(["git", "merge-file", ours_path, base_path, theirs_path])
+        textual = subprocess.run(["git", "merge-file",
+                                  "-L", f"{pathname} (composed)", "-L", f"{pathname} (base)",
+                                  "-L", f"{pathname} (incoming)", ours_path, base_path, theirs_path])
         outcome = "merged textually" if textual.returncode == 0 else "left with conflict markers"
         print(f"registry-merge: {pathname}: structured merge not provably safe — {outcome}",
               file=sys.stderr)

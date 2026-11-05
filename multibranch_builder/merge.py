@@ -138,9 +138,10 @@ def merge_source_into_current(repo_dir: str, source_ref: str, branch_label: str,
                               base_label: str, resolver: Resolver = ai_resolve) -> str:
     """Merge `source_ref` into the checked-out branch with `--no-commit`; the result stays staged.
 
-    Returns one of OUTCOMES: `up-to-date` (nothing staged), `merged` (clean), `ai-resolved`
-    (rerere, the registry driver or the resolver finished it), or `conflict` (aborted, tree clean).
-    Raises ComposeError when MERGE_HEAD survives both `git merge --abort` and `git reset --hard`.
+    Returns one of OUTCOMES: `up-to-date` (nothing staged), `merged` (clean, a merge driver's own
+    resolution included), `ai-resolved` (rerere or the resolver finished it), or `conflict` (aborted,
+    tree clean at the pre-merge commit). Raises ComposeError when MERGE_HEAD survives the abort and
+    reset, or HEAD stays off the pre-merge commit.
     """
     merge = _run(["git", "merge", "--no-commit", "--no-ff", source_ref], cwd=repo_dir, check=False)
     conflicted = conflicted_files(repo_dir)
@@ -158,6 +159,16 @@ def merge_source_into_current(repo_dir: str, source_ref: str, branch_label: str,
     if abort.returncode != 0:
         _log(f"{branch_label}: git merge --abort failed, resetting: {abort.stderr.strip()}")
         _run(["git", "reset", "--hard", "HEAD"], cwd=repo_dir, check=False)
+    # A resolver that committed the merge leaves HEAD past ORIG_HEAD, the pre-merge commit `git merge` recorded.
+    if _rev(repo_dir, "HEAD") != _rev(repo_dir, "ORIG_HEAD"):
+        _log(f"{branch_label}: HEAD moved during resolution, resetting to the pre-merge commit")
+        _run(["git", "reset", "--hard", "ORIG_HEAD"], cwd=repo_dir, check=False)
     if _run(["git", "rev-parse", "-q", "--verify", "MERGE_HEAD"], cwd=repo_dir, check=False).returncode == 0:
         raise ComposeError(f"{branch_label}: the merge could not be aborted; MERGE_HEAD remains in {repo_dir}")
+    if _rev(repo_dir, "HEAD") != _rev(repo_dir, "ORIG_HEAD"):
+        raise ComposeError(f"{branch_label}: HEAD is not the pre-merge commit after the abort in {repo_dir}")
     return CONFLICT
+
+
+def _rev(repo_dir: str, ref: str) -> str:
+    return _run(["git", "rev-parse", ref], cwd=repo_dir, check=False).stdout.strip()

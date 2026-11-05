@@ -64,6 +64,10 @@ class FakeGit:
         return _completed()
 
 
+def _without_head_reads(calls):
+    return [c for c in calls if c not in (HEAD, ORIG)]
+
+
 def test_up_to_date_when_nothing_staged():
     git = FakeGit(merge_rc=0, staged_rc=0)
     with patch.object(merge, "_run", git):
@@ -100,7 +104,7 @@ def test_conflict_aborts_when_resolver_fails():
     git = FakeGit(merge_rc=1, conflicted=["src/a.cpp"])
     with patch.object(merge, "_run", git):
         assert merge_source_into_current("/w", "r/b", "b", "develop", resolver=MagicMock(return_value=False)) == CONFLICT
-    assert git.calls[-2:] == [ABORT, VERIFY]
+    assert _without_head_reads(git.calls)[-2:] == [ABORT, VERIFY]
     assert RESET not in git.calls
 
 
@@ -108,7 +112,7 @@ def test_conflict_resets_when_abort_fails():
     git = FakeGit(merge_rc=1, conflicted=["src/a.cpp"], abort_rc=128)
     with patch.object(merge, "_run", git):
         assert merge_source_into_current("/w", "r/b", "b", "develop", resolver=MagicMock(return_value=False)) == CONFLICT
-    assert git.calls[-3:] == [ABORT, RESET, VERIFY]
+    assert _without_head_reads(git.calls)[-3:] == [ABORT, RESET, VERIFY]
 
 
 def test_conflict_resets_a_merge_the_resolver_committed():
@@ -128,7 +132,7 @@ def test_raises_when_merge_head_survives_the_abort():
     git = FakeGit(merge_rc=1, conflicted=["src/a.cpp"], abort_rc=128, merge_head_kept=True)
     with patch.object(merge, "_run", git), pytest.raises(ComposeError, match="MERGE_HEAD"):
         merge_source_into_current("/w", "r/b", "b", "develop", resolver=MagicMock(return_value=False))
-    assert git.calls[-3:] == [ABORT, RESET, VERIFY]
+    assert _without_head_reads(git.calls)[-3:] == [ABORT, RESET, VERIFY]
 
 
 def test_files_with_conflict_markers(tmp_path):

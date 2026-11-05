@@ -58,7 +58,7 @@ outcomes recorded per branch in the manifest:
 |---|---|
 | `up-to-date` | the branch is already contained in the tree; nothing staged |
 | `merged` | clean merge |
-| `ai-resolved` | conflicts were finished by `git rerere`, by a kind's merge driver, or by `claude -p` |
+| `ai-resolved` | conflicts were finished by `git rerere` or by `claude -p` (a file a merge driver resolves leaves the outcome `merged`) |
 | `conflict` | nothing could resolve it; the merge is aborted and the tree left clean |
 
 Two mechanisms run before claude sees a conflict:
