@@ -16,6 +16,9 @@ substitutions:
   # Resolved per-build from the tree's strategy-matrix; the default only applies
   # when that lookup fails. A stale pin fails the build on missing toolchains.
   _CI_IMAGE: "ghcr.io/xrplf/xrpld/nix-ubuntu:sha-2e25435"
+  # The compiler cache: one tarball per CI image tag and build type in this bucket.
+  _CCACHE_BUCKET: "xrplf-perf-network-xrpld-ccache"
+  _CCACHE_KEY: "none/Release"
 
 options:
   logging: CLOUD_LOGGING_ONLY
@@ -23,6 +26,28 @@ options:
 timeout: "3600s"
 
 steps:
+  - id: ccache-restore
+    name: gcr.io/cloud-builders/gcloud
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        mkdir -p ccache
+        if gcloud storage cp gs://${_CCACHE_BUCKET}/${_CCACHE_KEY}.tar.gz ccache.tar.gz; then
+          tar -xzf ccache.tar.gz -C ccache && echo "ccache restored from ${_CCACHE_KEY}"
+        else
+          echo "no ccache object for ${_CCACHE_KEY}: cold build"
+        fi
+
+  - id: xrpld-build-stage
+    name: gcr.io/cloud-builders/docker
+    args: ["build", "--target", "build", "-t", "${_AR}/xrpld-build:${_TAG}", "-f", "composed.dockerfile",
+           "--build-arg", "FORCE_SUPPORTED=${_FORCE_SUPPORTED}",
+           "--build-arg", "SYMBOLS=${_SYMBOLS}",
+           "--build-arg", "GIT_SHA=${_GIT_SHA}", "--build-arg", "GIT_BRANCH=${_GIT_BRANCH}",
+           "--build-arg", "XRPLD_VERSION=${_XRPLD_VERSION}",
+           "--build-arg", "CI_IMAGE=${_CI_IMAGE}", "."]
+
   - id: xrpld-build
     name: gcr.io/cloud-builders/docker
     args: ["build", "-t", "${_AR}/xrpld:${_TAG}", "-f", "composed.dockerfile",
@@ -31,6 +56,22 @@ steps:
            "--build-arg", "GIT_SHA=${_GIT_SHA}", "--build-arg", "GIT_BRANCH=${_GIT_BRANCH}",
            "--build-arg", "XRPLD_VERSION=${_XRPLD_VERSION}",
            "--build-arg", "CI_IMAGE=${_CI_IMAGE}", "."]
+
+  - id: ccache-pack
+    name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -e
+        id=$$(docker create ${_AR}/xrpld-build:${_TAG})
+        mkdir -p ccache-out
+        docker cp $$id:/ccache/. ccache-out
+        tar -czf ccache-out.tar.gz -C ccache-out .
+
+  - id: ccache-save
+    name: gcr.io/cloud-builders/gcloud
+    args: ["storage", "cp", "ccache-out.tar.gz", "gs://${_CCACHE_BUCKET}/${_CCACHE_KEY}.tar.gz"]
 
 images:
   - ${_AR}/xrpld:${_TAG}

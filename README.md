@@ -39,7 +39,7 @@ is a package under
 
 | kind | tree_dir | default branch | options | settings | prepare | build |
 |---|---|---|---|---|---|---|
-| `xrpld` | `rippled` | `develop` | `force_supported` ON\|OFF, `datagram`, `version`, `symbols` ON\|OFF, `renumber` ON\|OFF, `ai_budget_usd` | none | none | Cloud Build with the dockerfiles under `targets/xrpld/cloudbuild/` |
+| `xrpld` | `rippled` | `develop` | `force_supported` ON\|OFF, `datagram`, `version`, `symbols` ON\|OFF, `renumber` ON\|OFF, `ai_budget_usd` | none | none | Cloud Build with the dockerfiles under `targets/xrpld/cloudbuild/`, compiled through ccache: the cache is one tarball per CI image tag in `gs://xrplf-perf-network-xrpld-ccache` (`<tag>/Release.tar.gz`), restored before and saved after every build |
 | `xrpl_js` | `xrpl.js` | `main` | none | `definitions` (required) | writes the node's `server_definitions` over `packages/ripple-binary-codec/src/enums/definitions.json` and regenerates `package-lock.json` | checks the tree is clean and its definitions load, then `npm ci`, `npm run build`, `npm test` into `npm-build.log` |
 
 The xrpl_js kind takes `definitions <json-rpc url>` from the conf and calls `server_definitions`

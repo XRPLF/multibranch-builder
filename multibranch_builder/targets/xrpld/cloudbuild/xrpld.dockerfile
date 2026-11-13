@@ -45,6 +45,9 @@ RUN git clone "$REPO" rippled && cd rippled && git checkout "$BRANCH" && \
       git merge --no-edit FETCH_HEAD; \
     fi
 WORKDIR /work/rippled
+# The restored compiler cache; empty when none was saved for this CI image yet.
+COPY ccache/ /ccache
+ENV CCACHE_DIR=/ccache CCACHE_BASEDIR=/work/rippled CCACHE_COMPRESS=1 CCACHE_MAXSIZE=5G
 
 # setup-conan: global.conf + the `ci` profile + the xrplf remote at index 0.
 RUN cat conan/global.conf >> "$(conan config home)/global.conf" && \
@@ -76,13 +79,15 @@ RUN cd .build && \
       ! grep -q 'Supported::No,' "$MACRO" && \
       echo "FORCE_SUPPORTED=ON: every amendment in features.macro is Supported::Yes"; \
     fi && \
-    cmake -DCMAKE_TOOLCHAIN_FILE:FILEPATH=build/generators/conan_toolchain.cmake \
+    LAUNCHER=""; if command -v ccache >/dev/null 2>&1; then LAUNCHER=-DCMAKE_CXX_COMPILER_LAUNCHER=ccache; fi && \
+    cmake $LAUNCHER -DCMAKE_TOOLCHAIN_FILE:FILEPATH=build/generators/conan_toolchain.cmake \
           -DCMAKE_BUILD_TYPE=Release -Dxrpld=ON -Dtests=OFF -Dvalidator_keys=ON \
           -DCMAKE_CXX_FLAGS=-DBOOST_ASIO_HAS_STD_INVOKE_RESULT \
           -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc" .. && \
     JOBS=$(awk -v c="$(nproc)" '/MemTotal/{m=int($2/1024/1024/3); j=(m<c?m:c); print (j<1?1:j)}' /proc/meminfo) && \
     echo "compiling xrpld with $JOBS parallel jobs (mem-capped)" && \
     cmake --build . --target xrpld --parallel "$JOBS" && \
+    { ! command -v ccache >/dev/null 2>&1 || ccache -s; } && \
     if [ "$SYMBOLS" != "ON" ]; then strip -s xrpld; fi && \
     mkdir -p /out && cp xrpld /out/ && \
     if cmake --build . --target help | grep -qw 'validator-keys'; then \

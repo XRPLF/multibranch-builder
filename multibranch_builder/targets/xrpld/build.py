@@ -19,6 +19,8 @@ from ..base import BuildRequest
 
 CI_IMAGE_REPO = "ghcr.io/xrplf/xrpld/nix-ubuntu"
 DEFAULT_CI_IMAGE = f"{CI_IMAGE_REPO}:sha-2e25435"
+CCACHE_BUCKET = "xrplf-perf-network-xrpld-ccache"
+BUILD_TYPE = "Release"
 STRATEGY_MATRIX = ".github/scripts/strategy-matrix/linux.json"
 _CLOUDBUILD = Path(__file__).with_name("cloudbuild")
 _VERSION_CMAKE = Path("cmake/XrplVersion.cmake")
@@ -74,6 +76,11 @@ def ci_image_from_tree(tree: str | Path) -> str:
     return image
 
 
+def ccache_key(ci_image: str) -> str:
+    """The cache key of a CI image: its tag and the build type."""
+    return f"{ci_image.rpartition(':')[2]}/{BUILD_TYPE}"
+
+
 def stamp_version(root: Path, version: str) -> None:
     """Make a tree whose cmake ignores FORCE_XRPLD_VERSION report `version` by rewriting its literal."""
     cmake = root / _VERSION_CMAKE
@@ -108,7 +115,8 @@ def submit_tree(tree: str | Path, project: str, ar: str, tag: str, *, sha: str, 
         build_id, status = submit(
             stage, str(_CLOUDBUILD / "cloudbuild.composed.yaml"),
             {"_AR": ar, "_TAG": tag, "_FORCE_SUPPORTED": force_supported, "_CI_IMAGE": ci_image,
-             "_GIT_SHA": sha, "_GIT_BRANCH": branch, "_XRPLD_VERSION": version, "_SYMBOLS": symbols},
+             "_GIT_SHA": sha, "_GIT_BRANCH": branch, "_XRPLD_VERSION": version, "_SYMBOLS": symbols,
+             "_CCACHE_BUCKET": CCACHE_BUCKET, "_CCACHE_KEY": ccache_key(ci_image)},
             project, pool, region)
     finally:
         shutil.rmtree(stage, ignore_errors=True)
@@ -133,7 +141,8 @@ def submit_branch(source: BranchEntry, sha: str, project: str, ar: str, tag: str
              "_DATAGRAM_REPO": datagram.url if datagram else "",
              "_DATAGRAM_REF": datagram.branch if datagram else "",
              "_AR": ar, "_TAG": tag, "_FORCE_SUPPORTED": force_supported, "_CI_IMAGE": ci_image,
-             "_SYMBOLS": symbols},
+             "_SYMBOLS": symbols,
+             "_CCACHE_BUCKET": CCACHE_BUCKET, "_CCACHE_KEY": ccache_key(ci_image)},
             project, pool, region)
     finally:
         shutil.rmtree(stage, ignore_errors=True)
