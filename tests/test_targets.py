@@ -54,6 +54,13 @@ def test_xrpld_symbols_option_and_tag_suffix():
         XRPLD.validate_options({"symbols": "yes"})
 
 
+def test_xrpld_ccache_option_returned_only_when_off():
+    assert XRPLD.validate_options({"ccache": "ON"}) == {"force_supported": "OFF"}
+    assert XRPLD.validate_options({"ccache": "OFF"}) == {"force_supported": "OFF", "ccache": "OFF"}
+    with pytest.raises(ConfError, match="ccache must be ON or OFF"):
+        XRPLD.validate_options({"ccache": "yes"})
+
+
 def test_xrpld_renumber_and_ai_budget_options_returned_only_when_given():
     assert XRPLD.validate_options({}) == {"force_supported": "OFF"}
     assert XRPLD.validate_options({"renumber": "OFF"}) == {"force_supported": "OFF", "renumber": "OFF"}

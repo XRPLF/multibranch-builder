@@ -27,6 +27,8 @@ ARG DATAGRAM_REF=
 ARG FORCE_SUPPORTED=OFF
 # ON keeps xrpld's symbol table and debug info (no strip), for profiling.
 ARG SYMBOLS=OFF
+# OFF compiles without ccache.
+ARG CCACHE=ON
 
 FROM ${CI_IMAGE} AS build
 ARG REPO
@@ -35,6 +37,7 @@ ARG DATAGRAM_REPO
 ARG DATAGRAM_REF
 ARG FORCE_SUPPORTED
 ARG SYMBOLS
+ARG CCACHE
 USER root
 WORKDIR /work
 RUN git clone "$REPO" rippled && cd rippled && git checkout "$BRANCH" && \
@@ -79,7 +82,7 @@ RUN cd .build && \
       ! grep -q 'Supported::No,' "$MACRO" && \
       echo "FORCE_SUPPORTED=ON: every amendment in features.macro is Supported::Yes"; \
     fi && \
-    LAUNCHER=""; if command -v ccache >/dev/null 2>&1; then LAUNCHER=-DCMAKE_CXX_COMPILER_LAUNCHER=ccache; fi && \
+    LAUNCHER=""; if [ "$CCACHE" = "ON" ] && command -v ccache >/dev/null 2>&1; then LAUNCHER=-DCMAKE_CXX_COMPILER_LAUNCHER=ccache; fi && \
     cmake $LAUNCHER -DCMAKE_TOOLCHAIN_FILE:FILEPATH=build/generators/conan_toolchain.cmake \
           -DCMAKE_BUILD_TYPE=Release -Dxrpld=ON -Dtests=OFF -Dvalidator_keys=ON \
           -DCMAKE_CXX_FLAGS=-DBOOST_ASIO_HAS_STD_INVOKE_RESULT \
@@ -87,7 +90,7 @@ RUN cd .build && \
     JOBS=$(awk -v c="$(nproc)" '/MemTotal/{m=int($2/1024/1024/3); j=(m<c?m:c); print (j<1?1:j)}' /proc/meminfo) && \
     echo "compiling xrpld with $JOBS parallel jobs (mem-capped)" && \
     cmake --build . --target xrpld --parallel "$JOBS" && \
-    { ! command -v ccache >/dev/null 2>&1 || ccache -s; } && \
+    { [ "$CCACHE" != "ON" ] || ! command -v ccache >/dev/null 2>&1 || ccache -s; } && \
     if [ "$SYMBOLS" != "ON" ]; then strip -s xrpld; fi && \
     mkdir -p /out && cp xrpld /out/ && \
     if cmake --build . --target help | grep -qw 'validator-keys'; then \

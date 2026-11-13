@@ -20,6 +20,8 @@ substitutions:
   # The compiler cache: one tarball per CI image tag and build type in this bucket.
   _CCACHE_BUCKET: "xrplf-perf-network-xrpld-ccache"
   _CCACHE_KEY: "none/Release"
+  # OFF compiles without ccache.
+  _CCACHE: "ON"
 
 options:
   # Machine via submit flags: --machine-type (default pool) or --worker-pool + --region.
@@ -42,6 +44,7 @@ steps:
         else
           echo "no ccache object for ${_CCACHE_KEY}: cold build"
         fi
+        rm -f ccache.tar.gz
 
   - id: xrpld-build-stage
     name: gcr.io/cloud-builders/docker
@@ -66,6 +69,8 @@ steps:
       - --build-arg
       - SYMBOLS=${_SYMBOLS}
       - --build-arg
+      - CCACHE=${_CCACHE}
+      - --build-arg
       - CI_IMAGE=${_CI_IMAGE}
       - .
 
@@ -89,6 +94,8 @@ steps:
       - FORCE_SUPPORTED=${_FORCE_SUPPORTED}
       - --build-arg
       - SYMBOLS=${_SYMBOLS}
+      - --build-arg
+      - CCACHE=${_CCACHE}
       - --build-arg
       - CI_IMAGE=${_CI_IMAGE}
       - .

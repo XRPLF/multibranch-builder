@@ -68,7 +68,7 @@ def test_submit_tree_propagates_ar_into_substitutions_and_image(mock_submit, tmp
     assert subs == {"_AR": ar, "_TAG": "alphanet-01234567", "_FORCE_SUPPORTED": "ON",
                     "_CI_IMAGE": "ghcr.io/xrplf/xrpld/nix-ubuntu:sha-abc1234",
                     "_GIT_SHA": "c" * 40, "_GIT_BRANCH": "alphanet", "_XRPLD_VERSION": "3.4.1+01234567",
-                    "_SYMBOLS": "OFF", "_CCACHE_BUCKET": "xrplf-alphanet-xrpld-ccache",
+                    "_SYMBOLS": "OFF", "_CCACHE": "ON", "_CCACHE_BUCKET": "xrplf-alphanet-xrpld-ccache",
                     "_CCACHE_KEY": "sha-abc1234/Release"}
     assert config.endswith("cloudbuild.composed.yaml")
     assert (project, pool, region) == ("xrplf-alphanet", "xrpld-pool", "us-central1")
@@ -137,7 +137,7 @@ def test_cli_build_tree_honors_ar_and_prints_image_last(mock_submit, tmp_path, c
     args, kwargs = mock_submit.call_args
     assert args[1:] == ("xrplf-alphanet", ar, "alphanet-01234567-dg")
     assert kwargs == {"sha": SHA, "branch": "alphanet", "pool": "xrpld-pool", "force_supported": "ON",
-                      "version": "", "symbols": "OFF", "ci_image": None}
+                      "version": "", "symbols": "OFF", "ccache": "ON", "ci_image": None}
     assert capsys.readouterr().out.strip().splitlines()[-1] == f"{ar}/xrpld:alphanet-01234567-dg"
     record = json.loads((workdir / "build.json").read_text())
     assert record["ar"] == ar
@@ -334,3 +334,38 @@ def test_dockerfiles_launch_ccache(name):
     assert "CCACHE_BASEDIR=/work/rippled" in text
     assert "command -v ccache" in text
     assert "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache" in text
+
+
+@patch(f"{XBUILD}.submit", return_value=("build-7", "SUCCESS"))
+def test_ccache_option_reaches_the_substitutions(mock_submit, tmp_path):
+    tree = tmp_path / "rippled"
+    (tree / "cmake").mkdir(parents=True)
+    (tree / "cmake/XrplVersion.cmake").write_text("if(DEFINED ENV{FORCE_XRPLD_VERSION})\n")
+    xbuild.submit_tree(tree, "p", "ar", "t", sha="c" * 40, branch="b", ci_image=CI_IMAGE)
+    assert mock_submit.call_args.args[2]["_CCACHE"] == "ON"
+    xbuild.submit_tree(tree, "p", "ar", "t", sha="c" * 40, branch="b", ccache="OFF", ci_image=CI_IMAGE)
+    assert mock_submit.call_args.args[2]["_CCACHE"] == "OFF"
+    xbuild.submit_branch(BranchEntry("XRPLF", "rippled", "x"), SHA, "p", "ar", "t", ccache="OFF", ci_image=CI_IMAGE)
+    assert mock_submit.call_args.args[2]["_CCACHE"] == "OFF"
+
+
+@pytest.mark.parametrize("name", ["cloudbuild.yaml", "cloudbuild.composed.yaml"])
+def test_cloudbuild_passes_ccache_switch_and_frees_the_tarball(name):
+    text = (CLOUDBUILD_DIR / name).read_text()
+    assert "CCACHE=${_CCACHE}" in _step(text, "xrpld-build-stage")
+    assert "CCACHE=${_CCACHE}" in _step(text, "xrpld-build")
+    assert "rm -f ccache.tar.gz" in _step(text, "ccache-restore")
+
+
+@pytest.mark.parametrize("name", ["cloudbuild.yaml", "cloudbuild.composed.yaml"])
+def test_ccache_pack_copies_from_the_build_stage_image(name):
+    pack = _step((CLOUDBUILD_DIR / name).read_text(), "ccache-pack")
+    assert "docker create ${_AR}/xrpld-build:${_TAG}" in pack
+    assert "docker cp $$id:/ccache/. ccache-out" in pack
+
+
+@pytest.mark.parametrize("name", ["xrpld.dockerfile", "composed.dockerfile"])
+def test_dockerfiles_gate_ccache_launcher_on_the_switch(name):
+    text = (CLOUDBUILD_DIR / name).read_text()
+    assert "ARG CCACHE=ON" in text
+    assert '[ "$CCACHE" = "ON" ]' in text

@@ -8,6 +8,8 @@ ARG CI_IMAGE=ghcr.io/xrplf/xrpld/nix-ubuntu:sha-2e25435
 ARG FORCE_SUPPORTED=OFF
 # ON keeps xrpld's symbol table and debug info (no strip), for profiling.
 ARG SYMBOLS=OFF
+# OFF compiles without ccache.
+ARG CCACHE=ON
 # The upload has no .git: the composed commit and branch take its place for cmake's version, and a
 # non-empty XRPLD_VERSION overrides that version outright.
 ARG GIT_SHA=""
@@ -17,6 +19,7 @@ ARG XRPLD_VERSION=""
 FROM ${CI_IMAGE} AS build
 ARG FORCE_SUPPORTED
 ARG SYMBOLS
+ARG CCACHE
 ARG GIT_SHA
 ARG GIT_BRANCH
 ARG XRPLD_VERSION
@@ -47,7 +50,7 @@ RUN cd .build && \
       echo "FORCE_SUPPORTED=ON: every amendment in features.macro is Supported::Yes"; \
     fi && \
     GITHUB_HEAD_SHA="$GIT_SHA" GITHUB_BRANCH_NAME="$GIT_BRANCH" FORCE_XRPLD_VERSION="$XRPLD_VERSION" \
-    LAUNCHER=""; if command -v ccache >/dev/null 2>&1; then LAUNCHER=-DCMAKE_CXX_COMPILER_LAUNCHER=ccache; fi && \
+    LAUNCHER=""; if [ "$CCACHE" = "ON" ] && command -v ccache >/dev/null 2>&1; then LAUNCHER=-DCMAKE_CXX_COMPILER_LAUNCHER=ccache; fi && \
     cmake $LAUNCHER -DCMAKE_TOOLCHAIN_FILE:FILEPATH=build/generators/conan_toolchain.cmake \
           -DCMAKE_BUILD_TYPE=Release -Dxrpld=ON -Dtests=OFF -Dvalidator_keys=ON \
           -DCMAKE_CXX_FLAGS=-DBOOST_ASIO_HAS_STD_INVOKE_RESULT \
@@ -55,7 +58,7 @@ RUN cd .build && \
     JOBS=$(awk -v c="$(nproc)" '/MemTotal/{m=int($2/1024/1024/3); j=(m<c?m:c); print (j<1?1:j)}' /proc/meminfo) && \
     echo "compiling xrpld with $JOBS parallel jobs (mem-capped)" && \
     cmake --build . --target xrpld --parallel "$JOBS" && \
-    { ! command -v ccache >/dev/null 2>&1 || ccache -s; } && \
+    { [ "$CCACHE" != "ON" ] || ! command -v ccache >/dev/null 2>&1 || ccache -s; } && \
     if [ "$SYMBOLS" != "ON" ]; then strip -s xrpld; fi && \
     mkdir -p /out && cp xrpld /out/ && \
     if cmake --build . --target help | grep -qw 'validator-keys'; then \
