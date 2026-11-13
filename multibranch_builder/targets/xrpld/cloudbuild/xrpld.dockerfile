@@ -82,7 +82,8 @@ RUN cd .build && \
       ! grep -q 'Supported::No,' "$MACRO" && \
       echo "FORCE_SUPPORTED=ON: every amendment in features.macro is Supported::Yes"; \
     fi && \
-    LAUNCHER=""; if [ "$CCACHE" = "ON" ] && command -v ccache >/dev/null 2>&1; then LAUNCHER=-DCMAKE_CXX_COMPILER_LAUNCHER=ccache; fi && \
+    LAUNCHER="" && \
+    if [ "$CCACHE" = "ON" ] && command -v ccache >/dev/null 2>&1; then LAUNCHER=-DCMAKE_CXX_COMPILER_LAUNCHER=ccache; fi && \
     cmake $LAUNCHER -DCMAKE_TOOLCHAIN_FILE:FILEPATH=build/generators/conan_toolchain.cmake \
           -DCMAKE_BUILD_TYPE=Release -Dxrpld=ON -Dtests=OFF -Dvalidator_keys=ON \
           -DCMAKE_CXX_FLAGS=-DBOOST_ASIO_HAS_STD_INVOKE_RESULT \
@@ -90,9 +91,9 @@ RUN cd .build && \
     JOBS=$(awk -v c="$(nproc)" '/MemTotal/{m=int($2/1024/1024/3); j=(m<c?m:c); print (j<1?1:j)}' /proc/meminfo) && \
     echo "compiling xrpld with $JOBS parallel jobs (mem-capped)" && \
     if [ "$CCACHE" != "ON" ]; then export CCACHE_DISABLE=1; fi && \
-    { [ "$CCACHE" != "ON" ] || ! command -v ccache >/dev/null 2>&1 || ccache -z; } && \
+    { [ "$CCACHE" != "ON" ] || ! command -v ccache >/dev/null 2>&1 || ccache -z || true; } && \
     cmake --build . --target xrpld --parallel "$JOBS" && \
-    { [ "$CCACHE" != "ON" ] || ! command -v ccache >/dev/null 2>&1 || ccache -s; } && \
+    { [ "$CCACHE" != "ON" ] || ! command -v ccache >/dev/null 2>&1 || ccache -s || true; } && \
     if [ "$SYMBOLS" != "ON" ]; then strip -s xrpld; fi && \
     mkdir -p /out && cp xrpld /out/ && \
     if cmake --build . --target help | grep -qw 'validator-keys'; then \
