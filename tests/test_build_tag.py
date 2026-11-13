@@ -2,6 +2,8 @@
 
 import json
 import re
+import subprocess
+import textwrap
 from pathlib import Path
 from unittest.mock import patch
 
@@ -324,6 +326,34 @@ def test_cloudbuild_ccache_failures_do_not_fail_the_build(name):
     restore = _step(text, "ccache-restore")
     assert "|| {" in restore
     assert "rm -rf ccache" in restore and "mkdir -p ccache" in restore
+
+
+def _run_step(tmp_path, text, step_id, substitutions):
+    """Runs a bash step's script with Cloud Build's substitutions and a gcloud that logs its argv."""
+    lines = _step(text, step_id).splitlines()
+    start = next(i for i, line in enumerate(lines) if line.strip() == "- |") + 1
+    script = textwrap.dedent("\n".join(lines[start:]))
+    for key, value in substitutions.items():
+        script = script.replace("${%s}" % key, value)
+    script = script.replace("$$", "$")
+    stubs = tmp_path / "stubs"
+    stubs.mkdir()
+    (stubs / "gcloud").write_text('#!/bin/sh\necho "$*" >> "$GCLOUD_LOG"\n')
+    (stubs / "gcloud").chmod(0o755)
+    log = tmp_path / "gcloud.log"
+    env = {"PATH": f"{stubs}:/usr/bin:/bin", "GCLOUD_LOG": str(log)}
+    proc = subprocess.run(["bash", "-c", script], cwd=tmp_path, env=env, capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    return log.read_text().splitlines() if log.exists() else []
+
+
+@pytest.mark.parametrize("name", ["cloudbuild.yaml", "cloudbuild.composed.yaml"])
+@pytest.mark.parametrize("ccache,uploads", [("ON", 1), ("OFF", 0)])
+def test_ccache_save_uploads_only_when_ccache_is_on(tmp_path, name, ccache, uploads):
+    text = (CLOUDBUILD_DIR / name).read_text()
+    calls = _run_step(tmp_path, text, "ccache-save",
+                      {"_CCACHE": ccache, "_CCACHE_BUCKET": "b", "_CCACHE_KEY": "sha-1/Release"})
+    assert calls == ["storage cp ccache-out.tar.gz gs://b/sha-1/Release.tar.gz"] * uploads
 
 
 @pytest.mark.parametrize("name", ["xrpld.dockerfile", "composed.dockerfile"])

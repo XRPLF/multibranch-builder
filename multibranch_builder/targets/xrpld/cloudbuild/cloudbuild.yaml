@@ -116,7 +116,15 @@ steps:
   - id: ccache-save
     allowFailure: true
     name: gcr.io/cloud-builders/gcloud
-    args: ["storage", "cp", "ccache-out.tar.gz", "gs://${_CCACHE_BUCKET}/${_CCACHE_KEY}.tar.gz"]
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        if [ "${_CCACHE}" = "ON" ]; then
+          gcloud storage cp ccache-out.tar.gz gs://${_CCACHE_BUCKET}/${_CCACHE_KEY}.tar.gz
+        else
+          echo "ccache OFF: gs://${_CCACHE_BUCKET}/${_CCACHE_KEY}.tar.gz not overwritten"
+        fi
 
 images:
   - ${_AR}/xrpld:${_TAG}
