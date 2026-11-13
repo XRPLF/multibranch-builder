@@ -369,3 +369,20 @@ def test_dockerfiles_gate_ccache_launcher_on_the_switch(name):
     text = (CLOUDBUILD_DIR / name).read_text()
     assert "ARG CCACHE=ON" in text
     assert '[ "$CCACHE" = "ON" ]' in text
+
+
+@pytest.mark.parametrize("name", ["xrpld.dockerfile", "composed.dockerfile"])
+def test_dockerfiles_disable_ccache_before_compiling_when_off(name):
+    text = (CLOUDBUILD_DIR / name).read_text()
+    disable = 'if [ "$CCACHE" != "ON" ]; then export CCACHE_DISABLE=1; fi'
+    assert disable in text
+    assert text.index(disable) < text.index("cmake --build . --target xrpld")
+
+
+@pytest.mark.parametrize("name", ["xrpld.dockerfile", "composed.dockerfile"])
+def test_dockerfiles_zero_ccache_statistics_before_compiling_when_on(name):
+    text = (CLOUDBUILD_DIR / name).read_text()
+    zero = "ccache -z"
+    assert zero in text
+    assert text.index(zero) < text.index("cmake --build . --target xrpld")
+

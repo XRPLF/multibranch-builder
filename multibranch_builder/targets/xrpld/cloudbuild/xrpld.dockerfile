@@ -89,6 +89,8 @@ RUN cd .build && \
           -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc" .. && \
     JOBS=$(awk -v c="$(nproc)" '/MemTotal/{m=int($2/1024/1024/3); j=(m<c?m:c); print (j<1?1:j)}' /proc/meminfo) && \
     echo "compiling xrpld with $JOBS parallel jobs (mem-capped)" && \
+    if [ "$CCACHE" != "ON" ]; then export CCACHE_DISABLE=1; fi && \
+    { [ "$CCACHE" != "ON" ] || ! command -v ccache >/dev/null 2>&1 || ccache -z; } && \
     cmake --build . --target xrpld --parallel "$JOBS" && \
     { [ "$CCACHE" != "ON" ] || ! command -v ccache >/dev/null 2>&1 || ccache -s; } && \
     if [ "$SYMBOLS" != "ON" ]; then strip -s xrpld; fi && \
