@@ -1,6 +1,7 @@
 """Tag derivation, Cloud Build argv, and --ar/--set propagation into the xrpld submission."""
 
 import json
+import re
 from pathlib import Path
 from unittest.mock import patch
 
@@ -67,7 +68,8 @@ def test_submit_tree_propagates_ar_into_substitutions_and_image(mock_submit, tmp
     assert subs == {"_AR": ar, "_TAG": "alphanet-01234567", "_FORCE_SUPPORTED": "ON",
                     "_CI_IMAGE": "ghcr.io/xrplf/xrpld/nix-ubuntu:sha-abc1234",
                     "_GIT_SHA": "c" * 40, "_GIT_BRANCH": "alphanet", "_XRPLD_VERSION": "3.4.1+01234567",
-                    "_SYMBOLS": "OFF"}
+                    "_SYMBOLS": "OFF", "_CCACHE_BUCKET": "xrplf-perf-network-xrpld-ccache",
+                    "_CCACHE_KEY": "sha-abc1234/Release"}
     assert config.endswith("cloudbuild.composed.yaml")
     assert (project, pool, region) == ("xrplf-alphanet", "xrpld-pool", "us-central1")
 
@@ -267,3 +269,58 @@ def test_submit_tree_passes_symbols(mock_submit, tmp_path):
     (tree / "cmake/XrplVersion.cmake").write_text("if(DEFINED ENV{FORCE_XRPLD_VERSION})\n")
     xbuild.submit_tree(tree, "p", "ar", "t-sym", sha="c" * 40, branch="b", symbols="ON", ci_image="img")
     assert mock_submit.call_args.args[2]["_SYMBOLS"] == "ON"
+
+
+CI_IMAGE = "ghcr.io/xrplf/xrpld/nix-ubuntu:sha-473fe44"
+CLOUDBUILD_DIR = Path(xbuild.__file__).with_name("cloudbuild")
+
+
+def test_ccache_key_from_ci_image():
+    assert xbuild.ccache_key(CI_IMAGE) == "sha-473fe44/Release"
+
+
+@patch(f"{XBUILD}.submit", return_value=("build-5", "SUCCESS"))
+def test_submit_tree_passes_ccache_substitutions(mock_submit, tmp_path):
+    tree = tmp_path / "rippled"
+    (tree / "cmake").mkdir(parents=True)
+    (tree / "cmake/XrplVersion.cmake").write_text("if(DEFINED ENV{FORCE_XRPLD_VERSION})\n")
+    xbuild.submit_tree(tree, "xrplf-perf-network", "ar", "t", sha="c" * 40, branch="b", ci_image=CI_IMAGE)
+    subs = mock_submit.call_args.args[2]
+    assert subs["_CCACHE_BUCKET"] == "xrplf-perf-network-xrpld-ccache"
+    assert subs["_CCACHE_KEY"] == "sha-473fe44/Release"
+
+
+@patch(f"{XBUILD}.submit", return_value=("build-6", "SUCCESS"))
+def test_submit_branch_passes_ccache_substitutions(mock_submit):
+    src = BranchEntry("XRPLF", "rippled", "dangell7/x")
+    xbuild.submit_branch(src, SHA, "xrplf-perf-network", "ar", "t", ci_image=CI_IMAGE)
+    subs = mock_submit.call_args.args[2]
+    assert subs["_CCACHE_BUCKET"] == "xrplf-perf-network-xrpld-ccache"
+    assert subs["_CCACHE_KEY"] == "sha-473fe44/Release"
+
+
+def _step(text, step_id):
+    """The text of the step with `step_id` in a cloudbuild yaml (up to the next step or top-level key)."""
+    match = re.search(rf"^  - id: {step_id}\n(.*?)(?=^  - id: |^\S|\Z)", text, re.S | re.M)
+    assert match, f"no step {step_id}"
+    return match.group(1)
+
+
+@pytest.mark.parametrize("name", ["cloudbuild.yaml", "cloudbuild.composed.yaml"])
+def test_cloudbuild_restores_and_saves_ccache(name):
+    text = (CLOUDBUILD_DIR / name).read_text()
+    assert text.index("id: ccache-restore") < text.index("id: xrpld-build") < text.index("id: ccache-save")
+    for step_id in ("ccache-restore", "ccache-save"):
+        assert "name: gcr.io/cloud-builders/gcloud" in _step(text, step_id)
+    assert "gs://${_CCACHE_BUCKET}/${_CCACHE_KEY}.tar.gz" in _step(text, "ccache-restore")
+    assert "gs://${_CCACHE_BUCKET}/${_CCACHE_KEY}.tar.gz" in _step(text, "ccache-save")
+
+
+@pytest.mark.parametrize("name", ["xrpld.dockerfile", "composed.dockerfile"])
+def test_dockerfiles_launch_ccache(name):
+    text = (CLOUDBUILD_DIR / name).read_text()
+    assert "COPY ccache/ /ccache" in text
+    assert "CCACHE_DIR=/ccache" in text
+    assert "CCACHE_BASEDIR=/work/rippled" in text
+    assert "command -v ccache" in text
+    assert "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache" in text
