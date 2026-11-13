@@ -68,7 +68,7 @@ def test_submit_tree_propagates_ar_into_substitutions_and_image(mock_submit, tmp
     assert subs == {"_AR": ar, "_TAG": "alphanet-01234567", "_FORCE_SUPPORTED": "ON",
                     "_CI_IMAGE": "ghcr.io/xrplf/xrpld/nix-ubuntu:sha-abc1234",
                     "_GIT_SHA": "c" * 40, "_GIT_BRANCH": "alphanet", "_XRPLD_VERSION": "3.4.1+01234567",
-                    "_SYMBOLS": "OFF", "_CCACHE_BUCKET": "xrplf-perf-network-xrpld-ccache",
+                    "_SYMBOLS": "OFF", "_CCACHE_BUCKET": "xrplf-alphanet-xrpld-ccache",
                     "_CCACHE_KEY": "sha-abc1234/Release"}
     assert config.endswith("cloudbuild.composed.yaml")
     assert (project, pool, region) == ("xrplf-alphanet", "xrpld-pool", "us-central1")
@@ -284,9 +284,9 @@ def test_submit_tree_passes_ccache_substitutions(mock_submit, tmp_path):
     tree = tmp_path / "rippled"
     (tree / "cmake").mkdir(parents=True)
     (tree / "cmake/XrplVersion.cmake").write_text("if(DEFINED ENV{FORCE_XRPLD_VERSION})\n")
-    xbuild.submit_tree(tree, "xrplf-perf-network", "ar", "t", sha="c" * 40, branch="b", ci_image=CI_IMAGE)
+    xbuild.submit_tree(tree, "xrplf-alphanet", "ar", "t", sha="c" * 40, branch="b", ci_image=CI_IMAGE)
     subs = mock_submit.call_args.args[2]
-    assert subs["_CCACHE_BUCKET"] == "xrplf-perf-network-xrpld-ccache"
+    assert subs["_CCACHE_BUCKET"] == "xrplf-alphanet-xrpld-ccache"
     assert subs["_CCACHE_KEY"] == "sha-473fe44/Release"
 
 
@@ -314,6 +314,16 @@ def test_cloudbuild_restores_and_saves_ccache(name):
         assert "name: gcr.io/cloud-builders/gcloud" in _step(text, step_id)
     assert "gs://${_CCACHE_BUCKET}/${_CCACHE_KEY}.tar.gz" in _step(text, "ccache-restore")
     assert "gs://${_CCACHE_BUCKET}/${_CCACHE_KEY}.tar.gz" in _step(text, "ccache-save")
+
+
+@pytest.mark.parametrize("name", ["cloudbuild.yaml", "cloudbuild.composed.yaml"])
+def test_cloudbuild_ccache_failures_do_not_fail_the_build(name):
+    text = (CLOUDBUILD_DIR / name).read_text()
+    for step_id in ("ccache-pack", "ccache-save"):
+        assert "allowFailure: true" in _step(text, step_id)
+    restore = _step(text, "ccache-restore")
+    assert "|| {" in restore
+    assert "rm -rf ccache" in restore and "mkdir -p ccache" in restore
 
 
 @pytest.mark.parametrize("name", ["xrpld.dockerfile", "composed.dockerfile"])

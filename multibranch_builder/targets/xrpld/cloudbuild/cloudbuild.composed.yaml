@@ -34,7 +34,9 @@ steps:
       - |
         mkdir -p ccache
         if gcloud storage cp gs://${_CCACHE_BUCKET}/${_CCACHE_KEY}.tar.gz ccache.tar.gz; then
-          tar -xzf ccache.tar.gz -C ccache && echo "ccache restored from ${_CCACHE_KEY}"
+          tar -xzf ccache.tar.gz -C ccache && echo "ccache restored from ${_CCACHE_KEY}" || {
+            rm -rf ccache; mkdir -p ccache; echo "ccache object for ${_CCACHE_KEY} unreadable: cold build"
+          }
         else
           echo "no ccache object for ${_CCACHE_KEY}: cold build"
         fi
@@ -58,6 +60,7 @@ steps:
            "--build-arg", "CI_IMAGE=${_CI_IMAGE}", "."]
 
   - id: ccache-pack
+    allowFailure: true
     name: gcr.io/cloud-builders/docker
     entrypoint: bash
     args:
@@ -70,6 +73,7 @@ steps:
         tar -czf ccache-out.tar.gz -C ccache-out .
 
   - id: ccache-save
+    allowFailure: true
     name: gcr.io/cloud-builders/gcloud
     args: ["storage", "cp", "ccache-out.tar.gz", "gs://${_CCACHE_BUCKET}/${_CCACHE_KEY}.tar.gz"]
 
