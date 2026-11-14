@@ -8,6 +8,8 @@ ARG CI_IMAGE=ghcr.io/xrplf/xrpld/nix-ubuntu:sha-2e25435
 ARG FORCE_SUPPORTED=OFF
 # ON keeps xrpld's symbol table and debug info (no strip), for profiling.
 ARG SYMBOLS=OFF
+# OFF compiles without ccache.
+ARG CCACHE=ON
 # The upload has no .git: the composed commit and branch take its place for cmake's version, and a
 # non-empty XRPLD_VERSION overrides that version outright.
 ARG GIT_SHA=""
@@ -17,6 +19,7 @@ ARG XRPLD_VERSION=""
 FROM ${CI_IMAGE} AS build
 ARG FORCE_SUPPORTED
 ARG SYMBOLS
+ARG CCACHE
 ARG GIT_SHA
 ARG GIT_BRANCH
 ARG XRPLD_VERSION
@@ -24,6 +27,9 @@ USER root
 WORKDIR /work
 COPY rippled /work/rippled
 WORKDIR /work/rippled
+# The restored compiler cache; empty when none was saved for this CI image yet.
+COPY ccache/ /ccache
+ENV CCACHE_DIR=/ccache CCACHE_BASEDIR=/work/rippled CCACHE_COMPRESS=1 CCACHE_MAXSIZE=5G
 
 # setup-conan + download prebuilt deps (build only a branch's new deps).
 RUN cat conan/global.conf >> "$(conan config home)/global.conf" && \
@@ -43,14 +49,19 @@ RUN cd .build && \
       ! grep -q 'Supported::No,' "$MACRO" && \
       echo "FORCE_SUPPORTED=ON: every amendment in features.macro is Supported::Yes"; \
     fi && \
+    LAUNCHER="" && \
+    if [ "$CCACHE" = "ON" ] && command -v ccache >/dev/null 2>&1; then LAUNCHER=-DCMAKE_CXX_COMPILER_LAUNCHER=ccache; fi && \
     GITHUB_HEAD_SHA="$GIT_SHA" GITHUB_BRANCH_NAME="$GIT_BRANCH" FORCE_XRPLD_VERSION="$XRPLD_VERSION" \
-    cmake -DCMAKE_TOOLCHAIN_FILE:FILEPATH=build/generators/conan_toolchain.cmake \
+    cmake $LAUNCHER -DCMAKE_TOOLCHAIN_FILE:FILEPATH=build/generators/conan_toolchain.cmake \
           -DCMAKE_BUILD_TYPE=Release -Dxrpld=ON -Dtests=OFF -Dvalidator_keys=ON \
           -DCMAKE_CXX_FLAGS=-DBOOST_ASIO_HAS_STD_INVOKE_RESULT \
           -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc" .. && \
     JOBS=$(awk -v c="$(nproc)" '/MemTotal/{m=int($2/1024/1024/3); j=(m<c?m:c); print (j<1?1:j)}' /proc/meminfo) && \
     echo "compiling xrpld with $JOBS parallel jobs (mem-capped)" && \
+    if [ "$CCACHE" != "ON" ]; then export CCACHE_DISABLE=1; fi && \
+    { [ "$CCACHE" != "ON" ] || ! command -v ccache >/dev/null 2>&1 || ccache -z || true; } && \
     cmake --build . --target xrpld --parallel "$JOBS" && \
+    { [ "$CCACHE" != "ON" ] || ! command -v ccache >/dev/null 2>&1 || ccache -s || true; } && \
     if [ "$SYMBOLS" != "ON" ]; then strip -s xrpld; fi && \
     mkdir -p /out && cp xrpld /out/ && \
     if cmake --build . --target help | grep -qw 'validator-keys'; then \

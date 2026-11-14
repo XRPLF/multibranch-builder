@@ -58,6 +58,7 @@ class XrpldKind:
                    "(default: the tree's own)",
         "symbols": "ON|OFF: keep the symbol table and debug info instead of stripping xrpld and "
                    "validator-keys, for profiling; the image tag gets -sym (default OFF)",
+        "ccache": "ON|OFF: OFF compiles without the compiler cache, a clean build (default ON)",
         "renumber": "ON|OFF: OFF pins every registry number; the registry merge driver never renumbers "
                     "and leaves a number collision to the textual merge and the resolver (default ON)",
         "ai_budget_usd": "positive number: the claude resolver's --max-budget-usd per conflicted merge "
@@ -76,6 +77,10 @@ class XrpldKind:
             if options["symbols"] != "ON":
                 raise ConfError(f"symbols must be ON or OFF, got {options['symbols']!r}")
             out["symbols"] = "ON"
+        if options.get("ccache", "ON") != "ON":
+            if options["ccache"] != "OFF":
+                raise ConfError(f"ccache must be ON or OFF, got {options['ccache']!r}")
+            out["ccache"] = "OFF"
         if options.get("version"):
             if not _SEMVER.fullmatch(options["version"]):
                 raise ConfError(f"version must be a semantic version xrpld accepts, got {options['version']!r}")

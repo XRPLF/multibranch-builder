@@ -39,7 +39,7 @@ is a package under
 
 | kind | tree_dir | default branch | options | settings | prepare | build |
 |---|---|---|---|---|---|---|
-| `xrpld` | `rippled` | `develop` | `force_supported` ON\|OFF, `datagram`, `version`, `symbols` ON\|OFF, `renumber` ON\|OFF, `ai_budget_usd` | none | none | Cloud Build with the dockerfiles under `targets/xrpld/cloudbuild/` |
+| `xrpld` | `rippled` | `develop` | `force_supported` ON\|OFF, `datagram`, `version`, `symbols` ON\|OFF, `ccache` ON\|OFF, `renumber` ON\|OFF, `ai_budget_usd` | none | none | Cloud Build with the dockerfiles under `targets/xrpld/cloudbuild/`, compiled through ccache: the cache is one tarball per CI image tag in `gs://<project>-xrpld-ccache` (`<tag>/Release.tar.gz`), restored before and saved after every build; the bucket must exist and the project's Cloud Build service account needs `roles/storage.objectAdmin` on it, and without either the build still runs and only skips the cache |
 | `xrpl_js` | `xrpl.js` | `main` | none | `definitions` (required) | writes the node's `server_definitions` over `packages/ripple-binary-codec/src/enums/definitions.json` and regenerates `package-lock.json` | checks the tree is clean and its definitions load, then `npm ci`, `npm run build`, `npm test` into `npm-build.log` |
 
 The xrpl_js kind takes `definitions <json-rpc url>` from the conf and calls `server_definitions`
